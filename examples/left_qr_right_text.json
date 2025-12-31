@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "Example: left QR (30%) + right text",
+  "defaults": {
+    "leaf_padding_mm": [
+      1.5,
+      1.5,
+      1.5,
+      1.5
+    ],
+    "text": {
+      "font_height_mm": 4.0,
+      "wrap": "word",
+      "fit": "shrink_to_fit",
+      "max_lines": 6,
+      "align_h": "left",
+      "align_v": "top"
+    },
+    "code2d": {
+      "quiet_zone_mm": 1.0
+    },
+    "render": {
+      "missing_variables": "error",
+      "emit_ci28": true
+    }
+  },
+  "layout": {
+    "kind": "split",
+    "direction": "v",
+    "ratio": 0.3,
+    "gutter_mm": 0.5,
+    "divider": {
+      "visible": true,
+      "thickness_mm": 0.3
+    },
+    "children": [
+      {
+        "kind": "leaf",
+        "alias": "left_qr",
+        "elements": [
+          {
+            "type": "qr",
+            "data": "{id}",
+            "error_correction": "M"
+          }
+        ]
+      },
+      {
+        "kind": "leaf",
+        "alias": "right_text",
+        "elements": [
+          {
+            "type": "text",
+            "text": "{title}\\n{date}",
+            "wrap": "word"
+          }
+        ]
+      }
+    ]
+  }
+}

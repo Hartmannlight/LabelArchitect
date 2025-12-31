@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+.theme-dark {
+  --app-bg: #0a0a0a;
+  --app-text: #f5f5f5;
+  --panel-bg: #111111;
+  --panel-muted: #0b0b0b;
+  --bar-bg: #0a0a0a;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --text-accent: #93c5fd;
+  --text-strong: #e5e7eb;
+  --success: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --warn-bg: rgba(251, 191, 36, 0.15);
+  --danger-bg: rgba(248, 113, 113, 0.15);
+  --btn-bg: #111111;
+  --btn-hover: #18181b;
+  --btn-active-bg: #e5e7eb;
+  --btn-active-text: #0a0a0a;
+  --canvas-bg: #0b0b0b;
+  --canvas-stroke: #2a2a2a;
+  --canvas-leaf: #0b0b0b;
+  --canvas-leaf-stroke: #374151;
+  --canvas-content-stroke: #111827;
+  --canvas-gutter: #0f172a;
+  --canvas-gutter-selected: #111827;
+  --canvas-divider: #e5e7eb;
+  --canvas-handle: #9ca3af;
+  --canvas-handle-selected: #e5e7eb;
+}
+
+.theme-light {
+  --app-bg: #f8fafc;
+  --app-text: #0f172a;
+  --panel-bg: #ffffff;
+  --panel-muted: #f1f5f9;
+  --bar-bg: #ffffff;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-muted: #475569;
+  --text-subtle: #64748b;
+  --text-accent: #2563eb;
+  --text-strong: #0f172a;
+  --success: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --warn-bg: rgba(217, 119, 6, 0.15);
+  --danger-bg: rgba(220, 38, 38, 0.15);
+  --btn-bg: #f8fafc;
+  --btn-hover: #e2e8f0;
+  --btn-active-bg: #0f172a;
+  --btn-active-text: #f8fafc;
+  --canvas-bg: #f1f5f9;
+  --canvas-stroke: #cbd5e1;
+  --canvas-leaf: #ffffff;
+  --canvas-leaf-stroke: #94a3b8;
+  --canvas-content-stroke: #cbd5e1;
+  --canvas-gutter: #e2e8f0;
+  --canvas-gutter-selected: #cbd5e1;
+  --canvas-divider: #0f172a;
+  --canvas-handle: #64748b;
+  --canvas-handle-selected: #0f172a;
+}
+
+.app-root {
+  background: var(--app-bg);
+  color: var(--app-text);
+}
+
+.app-bar {
+  background: var(--bar-bg);
+  border-color: var(--border);
+}
+
+.panel {
+  background: var(--panel-bg);
+  border-color: var(--border);
+}
+
+.panel-muted {
+  background: var(--panel-muted);
+  border-color: var(--border);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-subtle {
+  color: var(--text-subtle);
+}
+
+.text-accent {
+  color: var(--text-accent);
+}
+
+.text-strong {
+  color: var(--text-strong);
+}
+
+.text-success {
+  color: var(--success);
+}
+
+.text-warn {
+  color: var(--warn);
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+.btn {
+  background: var(--btn-bg);
+  border-color: var(--border);
+  color: inherit;
+}
+
+.btn:hover {
+  background: var(--btn-hover);
+  border-color: var(--border-strong);
+}
+
+.btn-active {
+  background: var(--btn-active-bg);
+  border-color: var(--btn-active-bg);
+  color: var(--btn-active-text);
+}
