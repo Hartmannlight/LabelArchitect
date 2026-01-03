@@ -785,8 +785,9 @@ function LeafEditor(props: {
   const code2dDefaults = props.code2dDefaults
   const imageDefaults = props.imageDefaults
   const leafDefaults = props.leafPaddingDefaults ?? [1.5, 1.5, 1.5, 1.5]
-  const defaultMaxLines = getDefaultTextMaxLines(e.fit ?? defaults.fit)
-  const maxLinesValue = e.max_lines ?? defaults.max_lines ?? defaultMaxLines
+  const textFit = e.type === 'text' ? e.fit ?? defaults.fit : defaults.fit
+  const defaultMaxLines = getDefaultTextMaxLines(textFit)
+  const maxLinesValue = e.type === 'text' ? e.max_lines ?? defaults.max_lines ?? defaultMaxLines : defaultMaxLines
   const qrInputMode = e.type === 'qr' ? e.input_mode ?? (e.character_mode ? 'M' : 'A') : 'A'
   const qrCharacterMode = e.type === 'qr' ? e.character_mode ?? 'N' : 'N'
   const qrThemePreset = e.type === 'qr' ? e.theme?.preset ?? '' : ''
