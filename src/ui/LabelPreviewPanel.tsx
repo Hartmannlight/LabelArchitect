@@ -1,5 +1,7 @@
-import { type MouseEvent, type SyntheticEvent, type WheelEvent, useEffect, useRef, useState } from 'react'
+import { type MouseEvent, type SyntheticEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { computeLayout } from '../model/layout'
+import { renderBase, buildApiUrl } from '../api/config'
+import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 
 type RenderStatus = 'idle' | 'loading' | 'error'
@@ -20,13 +22,39 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
+async function readErrorBody(res: Response) {
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    try {
+      const payload = await res.json()
+      const detail = payload?.detail
+      if (Array.isArray(detail)) {
+        return detail
+          .map((item) => {
+            const loc = Array.isArray(item?.loc) ? item.loc.join('.') : ''
+            const prefix = loc ? `${loc}: ` : ''
+            return `${prefix}${item?.msg ?? 'Validation error'}`
+          })
+          .join('\n')
+      }
+      if (typeof payload?.message === 'string') return payload.message
+      if (typeof payload?.error === 'string') return payload.error
+      return JSON.stringify(payload)
+    } catch {
+      // fall through
+    }
+  }
+  return (await res.text()) || res.statusText
+}
+
 export default function LabelPreviewPanel() {
   const doc = useTemplateEditorStore((s) => s.history.present)
   const preview = useTemplateEditorStore((s) => s.preview)
+  const variableValues = useTemplateEditorStore((s) => s.variableValues)
   const selectNode = useTemplateEditorStore((s) => s.selectNode)
   const settings = useTemplateEditorStore((s) => s.settings)
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
-  const renderBase = (import.meta.env.VITE_RENDER_API_BASE as string | undefined) ?? ''
+  const renderBaseUrl = renderBase
   const [status, setStatus] = useState<RenderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -35,6 +63,14 @@ export default function LabelPreviewPanel() {
   const imgRef = useRef<HTMLImageElement | null>(null)
   const minZoom = 0.25
   const maxZoom = 5
+  const { variables: requiredVariables } = useMemo(() => extractTemplateVariables(doc), [doc])
+  const renderVariables = useMemo(() => {
+    const out: Record<string, string> = {}
+    requiredVariables.forEach((key) => {
+      out[key] = variableValues[key] ?? ''
+    })
+    return out
+  }, [requiredVariables, variableValues])
 
   useEffect(() => {
     let active = true
@@ -44,7 +80,7 @@ export default function LabelPreviewPanel() {
       setStatus('loading')
       setError(null)
       try {
-        const renderUrl = renderBase ? `${renderBase.replace(/\/+$/, '')}/v1/render/zpl` : '/v1/render/zpl'
+        const renderUrl = buildApiUrl(renderBaseUrl, '/v1/renders/zpl')
         const renderRes = await fetch(renderUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -57,13 +93,13 @@ export default function LabelPreviewPanel() {
               origin_x_mm: 0,
               origin_y_mm: 0
             },
-            variables: {},
+            variables: renderVariables,
             debug: false
           }),
           signal: controller.signal
         })
         if (!renderRes.ok) {
-          const msg = await renderRes.text()
+          const msg = await readErrorBody(renderRes)
           console.warn('[preview:render] request failed', {
             status: renderRes.status,
             statusText: renderRes.statusText,
@@ -129,7 +165,7 @@ export default function LabelPreviewPanel() {
       clearTimeout(timeout)
       controller.abort()
     }
-  }, [doc, preview.width_mm, preview.height_mm, preview.dpi])
+  }, [doc, preview.width_mm, preview.height_mm, preview.dpi, renderVariables])
 
   useEffect(() => {
     return () => {

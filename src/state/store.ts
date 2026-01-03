@@ -34,12 +34,18 @@ export type TemplateEditorState = {
   settings: EditorSettings
   theme: Theme
   validationIssues: string[]
+  backendTemplateId: string | null
+  variableValues: Record<string, string>
 
   newTemplate: () => void
   setTool: (tool: Tool) => void
   selectNode: (nodeId: string | null) => void
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
+  setBackendTemplateId: (templateId: string | null) => void
+  loadTemplate: (doc: TemplateDoc) => void
+  setVariableValue: (key: string, value: string) => void
+  syncVariableKeys: (keys: string[]) => void
 
   setTemplateName: (name: string) => void
   setDefaultsRaw: (defaults: any) => void
@@ -110,6 +116,7 @@ function defaultDoc(): TemplateDoc {
 const TEMPLATE_STORAGE_KEY = 'zplgrid_template_v1'
 const THEME_STORAGE_KEY = 'zplgrid_theme_v1'
 const PREVIEW_STORAGE_KEY = 'zplgrid_preview_v1'
+const VARIABLES_STORAGE_KEY = 'zplgrid_variables_v1'
 
 function loadStoredDoc(): TemplateDoc | null {
   if (typeof window === 'undefined') return null
@@ -163,6 +170,23 @@ function loadStoredPreview(): LabelPreviewTarget | null {
   }
 }
 
+function loadStoredVariables(): Record<string, string> | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(VARIABLES_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      out[key] = typeof value === 'string' ? value : String(value ?? '')
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 function saveStoredTheme(theme: Theme) {
   if (typeof window === 'undefined') return
   try {
@@ -181,6 +205,15 @@ function saveStoredPreview(preview: LabelPreviewTarget) {
   }
 }
 
+function saveStoredVariables(values: Record<string, string>) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(VARIABLES_STORAGE_KEY, JSON.stringify(values))
+  } catch {
+    // Ignore storage write errors (e.g. quota).
+  }
+}
+
 function validate(doc: TemplateDoc): string[] {
   const res = validateTemplate(doc)
   if (!res.ok) return res.issues
@@ -191,6 +224,7 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
   const initial = loadStoredDoc() ?? defaultDoc()
   const initialTheme = loadStoredTheme() ?? 'dark'
   const initialPreview = loadStoredPreview() ?? { width_mm: 74, height_mm: 26, dpi: 203 }
+  const initialVariables = loadStoredVariables() ?? {}
   return {
     history: makeHistory(initial),
     selection: { nodeId: 'r' },
@@ -199,17 +233,34 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     settings: { scalePxPerMm: 8, snapPercentStep: 5, previewZoom: 1, previewUnit: 'mm' },
     theme: initialTheme,
     validationIssues: validate(initial),
+    backendTemplateId: null,
+    variableValues: initialVariables,
 
     newTemplate: () => {
       const next = defaultDoc()
       const h = reset(get().history, next)
-      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(next) })
+      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(next), backendTemplateId: null })
     },
 
     setTool: (tool) => set({ tool }),
     selectNode: (nodeId) => set({ selection: nodeId ? { nodeId } : null }),
     setTheme: (theme) => set({ theme }),
     toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
+    setBackendTemplateId: (templateId) => set({ backendTemplateId: templateId }),
+    loadTemplate: (doc) => {
+      const h = reset(get().history, doc)
+      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(doc) })
+    },
+    setVariableValue: (key, value) =>
+      set((state) => ({ variableValues: { ...state.variableValues, [key]: value } })),
+    syncVariableKeys: (keys) =>
+      set((state) => {
+        const next: Record<string, string> = {}
+        keys.forEach((key) => {
+          next[key] = state.variableValues[key] ?? ''
+        })
+        return { variableValues: next }
+      }),
 
     setTemplateName: (name) => {
       const h = get().history
@@ -356,7 +407,7 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
         const res = validateTemplate(value)
         if (!res.ok) return { ok: false, issues: res.issues }
         const h = reset(get().history, res.doc)
-        set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(res.doc) })
+        set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(res.doc), backendTemplateId: null })
         return { ok: true }
       } catch (e: any) {
         return { ok: false, issues: [String(e?.message ?? e)] }
@@ -374,5 +425,8 @@ useTemplateEditorStore.subscribe((state, prev) => {
   }
   if (state.preview !== prev.preview) {
     saveStoredPreview(state.preview)
+  }
+  if (state.variableValues !== prev.variableValues) {
+    saveStoredVariables(state.variableValues)
   }
 })

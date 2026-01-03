@@ -5,6 +5,9 @@ import InfoHint from './InfoHint'
 type Props = {
   onOpenExport: () => void
   onOpenImport: () => void
+  onOpenTemplates: () => void
+  onPrint: () => void
+  printStatus: { state: 'idle' | 'loading' | 'error'; message?: string }
 }
 
 function ToolButton(props: { tool: Tool; label: string }) {
@@ -181,15 +184,30 @@ export default function TopBar(props: Props) {
           <button className='px-2 py-1 rounded border btn' onClick={newTemplate} type='button'>
             New
           </button>
+          <button className='px-2 py-1 rounded border btn' onClick={props.onOpenTemplates} type='button'>
+            Templates
+          </button>
           <button className='px-2 py-1 rounded border btn' onClick={props.onOpenImport} type='button'>
             Import
           </button>
           <button className='px-2 py-1 rounded border btn' onClick={props.onOpenExport} type='button'>
             Export
           </button>
+          <button
+            className='px-2 py-1 rounded border btn'
+            onClick={props.onPrint}
+            type='button'
+            disabled={props.printStatus.state === 'loading'}
+          >
+            Print
+          </button>
           <button className='px-2 py-1 rounded border btn' onClick={toggleTheme} type='button'>
             {theme === 'dark' ? 'Light' : 'Dark'}
           </button>
+        </div>
+        <div className='text-xs text-muted ml-3'>
+          {props.printStatus.state === 'loading' && 'Creating print draft...'}
+          {props.printStatus.state === 'error' && `Print failed: ${props.printStatus.message ?? 'Unknown error'}`}
         </div>
       </div>
     </div>

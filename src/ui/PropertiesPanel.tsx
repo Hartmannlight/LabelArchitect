@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import InfoHint from './InfoHint'
+import VariablesPanel from './VariablesPanel'
 import { getNodeById } from '../model/ids'
 import type { Element, LeafNode, SplitNode, TemplateDefaults } from '../model/types'
 import { useTemplateEditorStore } from '../state/store'
@@ -342,6 +343,8 @@ export default function PropertiesPanel() {
             )}
           </div>
         )}
+
+        <VariablesPanel />
       </div>
     </div>
   )

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { backendBase, buildApiUrl, normalizeBase, operatorBase } from '../api/config'
+import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 import CanvasEditor from '../ui/CanvasEditor'
 import JsonDialog from '../ui/JsonDialog'
 import LabelPreviewPanel from '../ui/LabelPreviewPanel'
 import PropertiesPanel from '../ui/PropertiesPanel'
+import TemplateStoreDialog from '../ui/TemplateStoreDialog'
 import TopBar from '../ui/TopBar'
 import TreePanel from '../ui/TreePanel'
 import ValidationPanel from '../ui/ValidationPanel'
@@ -19,9 +22,23 @@ function isEditableTarget(target: EventTarget | null) {
 export default function App() {
   const issues = useTemplateEditorStore((s) => s.validationIssues)
   const theme = useTemplateEditorStore((s) => s.theme)
+  const doc = useTemplateEditorStore((s) => s.history.present)
+  const preview = useTemplateEditorStore((s) => s.preview)
+  const variableValues = useTemplateEditorStore((s) => s.variableValues)
+  const syncVariableKeys = useTemplateEditorStore((s) => s.syncVariableKeys)
   const [jsonDialog, setJsonDialog] = useState<{ mode: 'export' | 'import' } | null>(null)
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
+  const [printStatus, setPrintStatus] = useState<{ state: 'idle' | 'loading' | 'error'; message?: string }>({
+    state: 'idle'
+  })
+  const [printError, setPrintError] = useState<string | null>(null)
   const [rightPanelWidth, setRightPanelWidth] = useState(440)
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null)
+  const { variables: requiredVariables } = useMemo(() => extractTemplateVariables(doc), [doc])
+
+  useEffect(() => {
+    syncVariableKeys(requiredVariables)
+  }, [requiredVariables, syncVariableKeys])
 
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -116,9 +133,71 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [jsonDialog])
 
+  const readErrorBody = async (res: Response) => {
+    const contentType = res.headers.get('content-type') ?? ''
+    if (contentType.includes('application/json')) {
+      try {
+        const payload = await res.json()
+        if (typeof payload?.message === 'string') return payload.message
+        if (typeof payload?.error === 'string') return payload.error
+        if (typeof payload?.detail === 'string') return payload.detail
+        return JSON.stringify(payload)
+      } catch {
+        // Fall through to text.
+      }
+    }
+    return (await res.text()) || res.statusText
+  }
+
+  const handlePrint = async () => {
+    setPrintStatus({ state: 'loading' })
+    try {
+      const variables: Record<string, string> = {}
+      requiredVariables.forEach((key) => {
+        variables[key] = variableValues[key] ?? ''
+      })
+      const res = await fetch(buildApiUrl(backendBase, '/v1/drafts'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          template: doc,
+          variables,
+          target: {
+            width_mm: preview.width_mm,
+            height_mm: preview.height_mm,
+            dpi: preview.dpi,
+            origin_x_mm: 0,
+            origin_y_mm: 0
+          },
+          debug: false
+        })
+      })
+      if (!res.ok) {
+        const body = await readErrorBody(res)
+        throw new Error(body || `Print draft failed (${res.status})`)
+      }
+      const payload = await res.json()
+      const draftId = payload?.draft_id
+      if (!draftId) throw new Error('Print draft API did not return a draft_id')
+      const operator = normalizeBase(operatorBase || '')
+      const target = `${operator || ''}/print?draft_id=${encodeURIComponent(draftId)}`
+      window.location.href = target
+    } catch (e: any) {
+      const message = String(e?.message ?? e)
+      setPrintStatus({ state: 'error', message })
+      setPrintError(message)
+    }
+  }
+
   return (
     <div className={'h-full flex flex-col app-root theme-' + theme}>
-      <TopBar onOpenExport={() => setJsonDialog({ mode: 'export' })} onOpenImport={() => setJsonDialog({ mode: 'import' })} />
+      <TopBar
+        onOpenExport={() => setJsonDialog({ mode: 'export' })}
+        onOpenImport={() => setJsonDialog({ mode: 'import' })}
+        onOpenTemplates={() => setTemplateDialogOpen(true)}
+        onPrint={handlePrint}
+        printStatus={printStatus}
+      />
       <div
         className='flex-1 min-h-0 min-w-0 grid gap-2 p-2'
         style={{ gridTemplateColumns: `320px minmax(0, 1fr) ${rightPanelWidth}px` }}
@@ -150,6 +229,20 @@ export default function App() {
       </div>
 
       {jsonDialog && <JsonDialog mode={jsonDialog.mode} onClose={() => setJsonDialog(null)} />}
+      {templateDialogOpen && <TemplateStoreDialog onClose={() => setTemplateDialogOpen(false)} />}
+      {printError && (
+        <div className='fixed inset-0 bg-black/70 flex items-center justify-center p-6'>
+          <div className='w-full max-w-2xl rounded border panel overflow-hidden'>
+            <div className='px-3 py-2 border-b app-bar flex items-center justify-between'>
+              <div className='text-sm font-semibold'>Print draft failed</div>
+              <button className='px-2 py-1 text-sm rounded border btn' onClick={() => setPrintError(null)} type='button'>
+                Close
+              </button>
+            </div>
+            <div className='p-3 text-sm whitespace-pre-wrap'>{printError}</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
