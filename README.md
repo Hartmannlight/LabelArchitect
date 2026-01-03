@@ -80,6 +80,11 @@ Konfiguration in `src/api/config.ts`:
 - `VITE_RENDER_API_BASE` (Default: Backend Base)
 - `VITE_OPERATOR_APP_BASE` (Default: `http://localhost:5174`)
 
+Runtime-Config (Docker/Nginx):
+- `APP_BACKEND_API_BASE`
+- `APP_RENDER_API_BASE`
+- `APP_OPERATOR_APP_BASE`
+
 Aktuelle Endpunkte, die das Frontend erwartet:
 
 Templates:
