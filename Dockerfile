@@ -1,19 +1,28 @@
-# Build
 FROM node:20-alpine AS build
-WORKDIR /app
 
-COPY package*.json ./
+WORKDIR /workspace
+
+COPY printhub-sdk ./printhub-sdk
+COPY LabelArchitect ./LabelArchitect
+
+WORKDIR /workspace/printhub-sdk
 RUN npm install
-
-COPY . .
 RUN npm run build
 
-# Serve
+WORKDIR /workspace/LabelArchitect
+RUN npm install
+RUN npm run build
+
 FROM nginx:1.27-alpine
+
 RUN apk add --no-cache gettext
-COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker-entrypoint.d/99-runtime-config.sh /docker-entrypoint.d/99-runtime-config.sh
-RUN chmod +x /docker-entrypoint.d/99-runtime-config.sh
+
+COPY --from=build /workspace/LabelArchitect/dist /usr/share/nginx/html
+COPY --from=build /workspace/LabelArchitect/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /workspace/LabelArchitect/public/config.template.js /usr/share/nginx/html/config.template.js
+COPY --from=build /workspace/LabelArchitect/docker-entrypoint.d/99-runtime-config.sh /docker-entrypoint.d/99-runtime-config.sh
+
+RUN sed -i 's/\r$//' /docker-entrypoint.d/99-runtime-config.sh \
+    && chmod +x /docker-entrypoint.d/99-runtime-config.sh
 
 EXPOSE 80

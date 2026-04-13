@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { backendBase, buildApiUrl, normalizeBase, operatorBase } from '../api/config'
+import { normalizeBase, operatorBase } from '../api/config'
+import { getBackendSdk } from '../api/sdk'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 import CanvasEditor from '../ui/CanvasEditor'
@@ -133,22 +134,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [jsonDialog])
 
-  const readErrorBody = async (res: Response) => {
-    const contentType = res.headers.get('content-type') ?? ''
-    if (contentType.includes('application/json')) {
-      try {
-        const payload = await res.json()
-        if (typeof payload?.message === 'string') return payload.message
-        if (typeof payload?.error === 'string') return payload.error
-        if (typeof payload?.detail === 'string') return payload.detail
-        return JSON.stringify(payload)
-      } catch {
-        // Fall through to text.
-      }
-    }
-    return (await res.text()) || res.statusText
-  }
-
   const handlePrint = async () => {
     setPrintStatus({ state: 'loading' })
     try {
@@ -156,27 +141,18 @@ export default function App() {
       requiredVariables.forEach((key) => {
         variables[key] = variableValues[key] ?? ''
       })
-      const res = await fetch(buildApiUrl(backendBase, '/v1/drafts'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          template: doc,
-          variables,
-          target: {
-            width_mm: preview.width_mm,
-            height_mm: preview.height_mm,
-            dpi: preview.dpi,
-            origin_x_mm: 0,
-            origin_y_mm: 0
-          },
-          debug: false
-        })
+      const payload = await getBackendSdk().drafts.create({
+        template: doc,
+        variables,
+        target: {
+          width_mm: preview.width_mm,
+          height_mm: preview.height_mm,
+          dpi: preview.dpi,
+          origin_x_mm: 0,
+          origin_y_mm: 0
+        },
+        debug: false
       })
-      if (!res.ok) {
-        const body = await readErrorBody(res)
-        throw new Error(body || `Print draft failed (${res.status})`)
-      }
-      const payload = await res.json()
       const draftId = payload?.draft_id
       if (!draftId) throw new Error('Print draft API did not return a draft_id')
       const operator = normalizeBase(operatorBase || '')

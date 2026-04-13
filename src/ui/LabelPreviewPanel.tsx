@@ -1,50 +1,13 @@
 import { type MouseEvent, type SyntheticEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { getRenderSdk } from '../api/sdk'
 import { computeLayout } from '../model/layout'
-import { renderBase, buildApiUrl } from '../api/config'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 
 type RenderStatus = 'idle' | 'loading' | 'error'
 
-function mmToIn(mm: number) {
-  return mm / 25.4
-}
-
-function dpiToDpmm(dpi: number) {
-  return Math.max(1, Math.round(dpi / 25.4))
-}
-
-function formatInches(value: number) {
-  return Number(value.toFixed(2))
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
-}
-
-async function readErrorBody(res: Response) {
-  const contentType = res.headers.get('content-type') ?? ''
-  if (contentType.includes('application/json')) {
-    try {
-      const payload = await res.json()
-      const detail = payload?.detail
-      if (Array.isArray(detail)) {
-        return detail
-          .map((item) => {
-            const loc = Array.isArray(item?.loc) ? item.loc.join('.') : ''
-            const prefix = loc ? `${loc}: ` : ''
-            return `${prefix}${item?.msg ?? 'Validation error'}`
-          })
-          .join('\n')
-      }
-      if (typeof payload?.message === 'string') return payload.message
-      if (typeof payload?.error === 'string') return payload.error
-      return JSON.stringify(payload)
-    } catch {
-      // fall through
-    }
-  }
-  return (await res.text()) || res.statusText
 }
 
 export default function LabelPreviewPanel() {
@@ -54,7 +17,6 @@ export default function LabelPreviewPanel() {
   const selectNode = useTemplateEditorStore((s) => s.selectNode)
   const settings = useTemplateEditorStore((s) => s.settings)
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
-  const renderBaseUrl = renderBase
   const [status, setStatus] = useState<RenderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
@@ -80,65 +42,18 @@ export default function LabelPreviewPanel() {
       setStatus('loading')
       setError(null)
       try {
-        const renderUrl = buildApiUrl(renderBaseUrl, '/v1/renders/zpl')
-        const renderRes = await fetch(renderUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            template: doc,
-            target: {
-              width_mm: preview.width_mm,
-              height_mm: preview.height_mm,
-              dpi: preview.dpi,
-              origin_x_mm: 0,
-              origin_y_mm: 0
-            },
-            variables: renderVariables,
-            debug: false
-          }),
-          signal: controller.signal
+        const blob = await getRenderSdk().renders.renderPng({
+          template: doc,
+          target: {
+            width_mm: preview.width_mm,
+            height_mm: preview.height_mm,
+            dpi: preview.dpi,
+            origin_x_mm: 0,
+            origin_y_mm: 0
+          },
+          variables: renderVariables,
+          debug: false
         })
-        if (!renderRes.ok) {
-          const msg = await readErrorBody(renderRes)
-          console.warn('[preview:render] request failed', {
-            status: renderRes.status,
-            statusText: renderRes.statusText,
-            url: renderRes.url,
-            body: msg
-          })
-          throw new Error(msg || `Render API error (${renderRes.status})`)
-        }
-        const payload = await renderRes.json()
-        const zpl = payload?.zpl
-        if (typeof zpl !== 'string') {
-          console.warn('[preview:render] invalid response payload', { url: renderRes.url, payload })
-          throw new Error('Render API did not return ZPL')
-        }
-
-        const dpmm = dpiToDpmm(preview.dpi)
-        const wIn = formatInches(mmToIn(preview.width_mm))
-        const hIn = formatInches(mmToIn(preview.height_mm))
-        const labelaryUrl = `https://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${wIn}x${hIn}/0/`
-
-        const form = new FormData()
-        form.append('file', zpl)
-        const labelRes = await fetch(labelaryUrl, {
-          method: 'POST',
-          headers: { Accept: 'image/png' },
-          body: form,
-          signal: controller.signal
-        })
-        if (!labelRes.ok) {
-          const msg = await labelRes.text()
-          console.warn('[preview:labelary] request failed', {
-            status: labelRes.status,
-            statusText: labelRes.statusText,
-            url: labelRes.url,
-            body: msg
-          })
-          throw new Error(msg || `Labelary error (${labelRes.status})`)
-        }
-        const blob = await labelRes.blob()
         const nextUrl = URL.createObjectURL(blob)
         if (!active) {
           URL.revokeObjectURL(nextUrl)

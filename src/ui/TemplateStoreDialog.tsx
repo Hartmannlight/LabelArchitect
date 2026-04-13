@@ -1,25 +1,10 @@
+import type { TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
 import { useEffect, useMemo, useState } from 'react'
-import { backendBase, buildApiUrl } from '../api/config'
+import { getBackendSdk } from '../api/sdk'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 
-type TemplateListItem = {
-  id: string
-  name: string
-  tags?: string[]
-  preview_available?: boolean
-}
-
-type TemplateDetails = {
-  id: string
-  name: string
-  tags?: string[]
-  variables?: Array<{ name: string; mode?: string; default?: unknown }>
-  preview_available?: boolean
-  template: unknown
-  sample_data?: Record<string, unknown>
-  preview_target?: { width_mm: number; height_mm: number; dpi: number; origin_x_mm?: number; origin_y_mm?: number }
-}
+type TemplateDetails = TemplateDetailResponse
 
 type Props = {
   onClose: () => void
@@ -81,7 +66,6 @@ export default function TemplateStoreDialog(props: Props) {
   const [variablesTouched, setVariablesTouched] = useState(false)
   const [sampleDataTouched, setSampleDataTouched] = useState(false)
 
-  const apiBase = backendBase
   const { variables: requiredVariables } = useMemo(() => extractTemplateVariables(doc), [doc])
 
   const defaultVariableDefs = useMemo(
@@ -95,12 +79,6 @@ export default function TemplateStoreDialog(props: Props) {
     })
     return out
   }, [requiredVariables, variableValues])
-  const listUrl = useMemo(() => {
-    const tagsQuery = parseTags(filterTags)
-    const base = buildApiUrl(apiBase, '/v1/templates')
-    if (!tagsQuery.length) return base
-    return `${base}?tags=${encodeURIComponent(tagsQuery.join(','))}`
-  }, [apiBase, filterTags])
 
   const previewTarget = useMemo(
     () => ({
@@ -117,10 +95,10 @@ export default function TemplateStoreDialog(props: Props) {
     setStatus('loading')
     setError(null)
     try {
-      const res = await fetch(listUrl)
-      if (!res.ok) throw new Error(await res.text())
-      const payload = await res.json()
-      if (!Array.isArray(payload)) throw new Error('Invalid template list response')
+      const tagsQuery = parseTags(filterTags)
+      const payload = await getBackendSdk().templates.list({
+        tags: tagsQuery.length ? tagsQuery.join(',') : undefined
+      })
       setItems(payload)
       setStatus('idle')
     } catch (e: any) {
@@ -133,9 +111,7 @@ export default function TemplateStoreDialog(props: Props) {
     setStatus('loading')
     setError(null)
     try {
-      const res = await fetch(buildApiUrl(apiBase, `/v1/templates/${encodeURIComponent(id)}`))
-      if (!res.ok) throw new Error(await res.text())
-      const payload = (await res.json()) as TemplateDetails
+      const payload = (await getBackendSdk().templates.get(id)) as TemplateDetails
       setDetails(payload)
       setName(payload.name ?? '')
       setTags((payload.tags ?? []).join(', '))
@@ -154,9 +130,9 @@ export default function TemplateStoreDialog(props: Props) {
     setBackendTemplateId(details.id)
     if (details.preview_target) {
       setPreviewTarget({
-        width_mm: details.preview_target.width_mm,
-        height_mm: details.preview_target.height_mm,
-        dpi: details.preview_target.dpi
+        width_mm: Number(details.preview_target.width_mm),
+        height_mm: Number(details.preview_target.height_mm),
+        dpi: Number(details.preview_target.dpi)
       })
     }
   }
@@ -203,17 +179,10 @@ export default function TemplateStoreDialog(props: Props) {
         sample_data: sampleDataObj,
         preview_target: previewTarget
       }
-      const url =
+      const payload =
         mode === 'update' && backendTemplateId
-          ? buildApiUrl(apiBase, `/v1/templates/${encodeURIComponent(backendTemplateId)}`)
-          : buildApiUrl(apiBase, '/v1/templates')
-      const res = await fetch(url, {
-        method: mode === 'update' ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const payload = await res.json()
+          ? await getBackendSdk().templates.update(backendTemplateId, body)
+          : await getBackendSdk().templates.create(body)
       if (payload?.id) setBackendTemplateId(payload.id)
       await refreshList()
       setStatus('idle')
@@ -225,7 +194,7 @@ export default function TemplateStoreDialog(props: Props) {
 
   useEffect(() => {
     refreshList()
-  }, [listUrl])
+  }, [filterTags])
 
   useEffect(() => {
     if (!selectedId) return
@@ -256,14 +225,8 @@ export default function TemplateStoreDialog(props: Props) {
       if (prev) URL.revokeObjectURL(prev)
       return null
     })
-    fetch(buildApiUrl(apiBase, `/v1/templates/${encodeURIComponent(details.id)}/preview`), {
-      signal: controller.signal,
-      headers: { Accept: 'image/png' }
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.text()) || res.statusText)
-        return res.blob()
-      })
+    getBackendSdk()
+      .templates.getPreview(details.id)
       .then((blob) => {
         const url = URL.createObjectURL(blob)
         setPreviewUrl((prev) => {
@@ -278,7 +241,7 @@ export default function TemplateStoreDialog(props: Props) {
         setPreviewError(String(e?.message ?? e))
       })
     return () => controller.abort()
-  }, [apiBase, details?.id, details?.preview_available])
+  }, [details?.id, details?.preview_available])
 
   useEffect(() => {
     return () => {
