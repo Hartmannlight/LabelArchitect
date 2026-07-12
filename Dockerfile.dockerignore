@@ -1,0 +1,8 @@
+**
+!LabelArchitect/
+!LabelArchitect/**
+!printhub-sdk/
+!printhub-sdk/**
+**/.git
+**/node_modules
+**/dist

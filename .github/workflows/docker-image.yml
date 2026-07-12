@@ -2,10 +2,14 @@ name: Build and push Docker image
 
 on:
   push:
-    branches: [main]
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      sdk_ref:
+        description: PrintHub SDK branch or tag
+        required: true
+        default: feat/sdk-api-adoption
 
 jobs:
   build:
@@ -14,8 +18,17 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout
+      - name: Checkout LabelArchitect
         uses: actions/checkout@v4
+        with:
+          path: workspace/LabelArchitect
+
+      - name: Checkout matching PrintHub SDK
+        uses: actions/checkout@v4
+        with:
+          repository: Hartmannlight/printhub-sdk
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.sdk_ref || github.ref_name }}
+          path: workspace/printhub-sdk
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -43,8 +56,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: Dockerfile
+          context: workspace
+          file: workspace/LabelArchitect/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

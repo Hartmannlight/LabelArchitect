@@ -8,7 +8,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/v1': {
-        target: 'http://host.docker.internal:8000',
+        target: process.env.VITE_DEV_API_PROXY || 'http://127.0.0.1:8001',
         changeOrigin: true,
         secure: false
       }

@@ -1,4 +1,33 @@
-# zplgrid Template Editor (Web)
+# PrintHub Studio
+
+PrintHub Studio combines the former LabelArchitect desktop editor and the
+LabelGallery operator workflow in one React application.
+
+- `/#/templates`: reusable templates and starter designs
+- `/#/print`: mobile-first fill, preview and print flow
+- `/#/designer`: desktop-only visual template editor
+- `/#/printers`: PrintHub printer fleet and ZebraTamer discovery
+
+The application is intentionally independent from Thingdex. Template variables
+form a public, typed input contract that can be completed manually, through the
+PrintHub API, or by an optional Thingdex integration.
+
+ZebraTamer agents announce printers on the local network and accept queued ZPL
+jobs through REST. PrintHub remains responsible for templates and rendering;
+ZebraTamer remains responsible for hardware I/O and observed printer status.
+
+## Development
+
+Run PrintHub on `http://127.0.0.1:8001`, then:
+
+```bash
+npm install
+npm run dev
+```
+
+Set `VITE_DEV_API_PROXY` when PrintHub uses another address.
+
+## Legacy editor notes
 
 Ein Web-Editor zum Erstellen von `zplgrid` JSON-Templates (schema_version = 1). Ziel: Nicht-ZPL-Logik im Frontend bearbeitbar machen, damit das Backend die Templates spaeter in ZPL kompiliert und druckt.
 

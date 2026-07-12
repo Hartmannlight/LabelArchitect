@@ -27,15 +27,15 @@ function parseTags(value: string) {
 }
 
 function normalizeVariableDefs(value: unknown) {
-  if (!Array.isArray(value)) return [] as Array<{ name: string; mode?: string; default?: unknown }>
-  const out: Array<{ name: string; mode?: string; default?: unknown }> = []
+  if (!Array.isArray(value)) return [] as Array<Record<string, unknown> & { name: string; mode?: string; default?: unknown }>
+  const out: Array<Record<string, unknown> & { name: string; mode?: string; default?: unknown }> = []
   for (const item of value) {
     if (!item || typeof item !== 'object') continue
     const name = (item as any).name
     if (typeof name !== 'string' || !name.trim()) continue
     const mode = typeof (item as any).mode === 'string' ? (item as any).mode : undefined
     const def = (item as any).default
-    out.push({ name: name.trim(), mode, default: def })
+    out.push({ ...(item as Record<string, unknown>), name: name.trim(), mode, default: def })
   }
   return out
 }
@@ -68,17 +68,31 @@ export default function TemplateStoreDialog(props: Props) {
 
   const { variables: requiredVariables } = useMemo(() => extractTemplateVariables(doc), [doc])
 
+  const embeddedMetadata = useMemo(() => {
+    const value = doc.extensions?.printhub
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {}
+  }, [doc.extensions])
+
   const defaultVariableDefs = useMemo(
-    () => requiredVariables.map((name) => ({ name, mode: 'required' })),
-    [requiredVariables]
+    () => {
+      const embedded = normalizeVariableDefs(embeddedMetadata.variables)
+      return embedded.length ? embedded : requiredVariables.map((name) => ({ name, mode: 'required' }))
+    },
+    [embeddedMetadata.variables, requiredVariables]
   )
   const defaultSampleData = useMemo(() => {
+    const embedded = embeddedMetadata.sample_data
+    if (embedded && typeof embedded === 'object' && !Array.isArray(embedded)) {
+      return embedded as Record<string, unknown>
+    }
     const out: Record<string, unknown> = {}
     requiredVariables.forEach((name) => {
       out[name] = variableValues[name] ?? ''
     })
     return out
-  }, [requiredVariables, variableValues])
+  }, [embeddedMetadata.sample_data, requiredVariables, variableValues])
 
   const previewTarget = useMemo(
     () => ({
@@ -252,8 +266,10 @@ export default function TemplateStoreDialog(props: Props) {
   useEffect(() => {
     if (!details) {
       setName(doc.name ?? '')
+      const embeddedTags = embeddedMetadata.tags
+      if (Array.isArray(embeddedTags)) setTags(embeddedTags.map(String).join(', '))
     }
-  }, [details, doc.name])
+  }, [details, doc.name, embeddedMetadata.tags])
 
   useEffect(() => {
     if (variablesTouched) return
