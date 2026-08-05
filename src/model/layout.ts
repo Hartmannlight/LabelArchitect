@@ -1,4 +1,4 @@
-import type { Element, LeafNode, Node, SplitNode } from './types'
+import type { Element, ImageBackground, LeafNode, Node, SplitNode } from './types'
 
 export type RectPx = { x: number; y: number; w: number; h: number }
 
@@ -20,8 +20,15 @@ export type SplitRender = {
   dividerRect?: RectPx
 }
 
+export type BackgroundRender = {
+  nodeId: string
+  background: ImageBackground
+  rect: RectPx
+}
+
 export type LayoutRender = {
   rootRect: RectPx
+  backgrounds: BackgroundRender[]
   leaves: LeafRender[]
   splits: SplitRender[]
   aliasToId: Record<string, string>
@@ -34,6 +41,7 @@ export type LayoutOptions = {
 export function computeLayout(root: Node, widthMm: number, heightMm: number, opts: LayoutOptions): LayoutRender {
   const scale = opts.scalePxPerMm
   const rootRect: RectPx = { x: 0, y: 0, w: widthMm * scale, h: heightMm * scale }
+  const backgrounds: BackgroundRender[] = []
   const leaves: LeafRender[] = []
   const splits: SplitRender[] = []
   const aliasToId: Record<string, string> = {}
@@ -48,6 +56,7 @@ export function computeLayout(root: Node, widthMm: number, heightMm: number, opt
   const walk = (node: Node, nodeId: string, rect: RectPx) => {
     const alias = (node as any).alias as string | undefined
     if (alias) aliasToId[alias] = nodeId
+    if (node.background) backgrounds.push({ nodeId, background: node.background, rect })
 
     if (node.kind === 'leaf') {
       const pad = node.padding_mm ?? [0, 0, 0, 0]
@@ -102,5 +111,5 @@ export function computeLayout(root: Node, widthMm: number, heightMm: number, opt
   }
 
   walk(root, 'r', rootRect)
-  return { rootRect, leaves, splits, aliasToId }
+  return { rootRect, backgrounds, leaves, splits, aliasToId }
 }

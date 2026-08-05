@@ -91,6 +91,7 @@ export default function TreePanel() {
               ) : (
                 <span className='text-strong'>{n.alias ? n.alias : ''}</span>
               )}
+              {n.node.background && <span className='tree-background-badge' title='This area has a background image'>BG</span>}
             </button>
           )
         })}

@@ -1,4 +1,5 @@
 import type { LabelPreviewTarget, TemplateDoc } from './types'
+import { PROJECT_DEFAULTS } from '../config/projectDefaults'
 
 export type StarterTemplate = {
   id: string
@@ -11,13 +12,7 @@ export type StarterTemplate = {
   target: LabelPreviewTarget
 }
 
-const defaults: TemplateDoc['defaults'] = {
-  leaf_padding_mm: [1, 1, 1, 1],
-  text: { font_height_mm: 4, wrap: 'word', fit: 'shrink_to_fit', max_lines: 2, align_h: 'left', align_v: 'center' },
-  code2d: { quiet_zone_mm: 1, render_mode: 'zpl' },
-  image: { fit: 'contain', align_h: 'center', align_v: 'center', input_dpi: 203, threshold: 128, dither: 'none', invert: false },
-  render: { missing_variables: 'error', emit_ci28: true }
-}
+const defaults: TemplateDoc['defaults'] = PROJECT_DEFAULTS
 
 export const starterTemplates: StarterTemplate[] = [
   {
@@ -35,7 +30,7 @@ export const starterTemplates: StarterTemplate[] = [
     template: {
       schema_version: 1, name: 'Asset label', defaults,
       layout: { kind: 'split', direction: 'v', ratio: .36, gutter_mm: 1, divider: { visible: false, thickness_mm: .2 }, children: [
-        { kind: 'leaf', alias: 'code', elements: [{ type: 'qr', data: '{identifier}', size_mode: 'max', align_h: 'center', align_v: 'center' }] },
+        { kind: 'leaf', alias: 'code', elements: [{ type: 'qr', data: '{identifier}', size_mode: 'max', render_mode: 'image', align_h: 'center', align_v: 'center' }] },
         { kind: 'split', direction: 'h', ratio: .58, gutter_mm: .5, divider: { visible: false, thickness_mm: .2 }, children: [
           { kind: 'leaf', alias: 'title', elements: [{ type: 'text', text: '{title}', font_height_mm: 4.5, fit: 'shrink_to_fit', max_lines: 2, align_v: 'bottom' }] },
           { kind: 'leaf', alias: 'detail', elements: [{ type: 'text', text: '{detail}', font_height_mm: 2.5, fit: 'shrink_to_fit', max_lines: 2, align_v: 'top' }] }
@@ -58,7 +53,7 @@ export const starterTemplates: StarterTemplate[] = [
       schema_version: 1, name: 'Location label', defaults,
       layout: { kind: 'split', direction: 'v', ratio: .72, gutter_mm: 1.2, divider: { visible: false, thickness_mm: .2 }, children: [
         { kind: 'leaf', alias: 'name', elements: [{ type: 'text', text: '{container_name}', font_height_mm: 7, fit: 'shrink_to_fit', max_lines: 2, align_v: 'center' }] },
-        { kind: 'leaf', alias: 'code', elements: [{ type: 'qr', data: '{location_uuid}', size_mode: 'max', align_h: 'center', align_v: 'center' }] }
+        { kind: 'leaf', alias: 'code', elements: [{ type: 'qr', data: '{location_uuid}', size_mode: 'max', render_mode: 'image', align_h: 'center', align_v: 'center' }] }
       ] }
     }
   },

@@ -1,0 +1,38 @@
+template_defaults:
+  leaf_padding_mm: [0.5, 0.5, 0.5, 0.5]
+
+  text:
+    font_height_mm: 4
+    wrap: word
+    fit: shrink_to_fit
+    max_lines: 2
+    align_h: center
+    align_v: center
+
+  code2d:
+    quiet_zone_mm: 1
+    size_mode: max
+    render_mode: zpl
+    align_h: center
+    align_v: center
+
+  image:
+    fit: contain
+    align_h: center
+    align_v: center
+    input_dpi: 203
+    threshold: 128
+    dither: none
+    invert: false
+
+  render:
+    missing_variables: error
+    emit_ci28: true
+    debug_padding_guides: false
+    debug_gutter_guides: false
+
+element_defaults:
+  qr:
+    render_mode: image
+  datamatrix:
+    render_mode: image

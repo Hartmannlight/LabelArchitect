@@ -41,10 +41,17 @@ function collectPlaceholdersFromElement(element: Element, bucket: Set<string>) {
   }
   if (element.type === 'datamatrix') {
     extractPlaceholdersFromText(element.data).forEach((name) => bucket.add(name))
+    return
+  }
+  if (element.type === 'image') {
+    extractPlaceholdersFromText(element.source.data).forEach((name) => bucket.add(name))
   }
 }
 
 function collectFromNode(node: Node, bucket: Set<string>) {
+  if (node.background) {
+    extractPlaceholdersFromText(node.background.source.data).forEach((name) => bucket.add(name))
+  }
   if (node.kind === 'split') {
     collectFromNode(node.children[0], bucket)
     collectFromNode(node.children[1], bucket)

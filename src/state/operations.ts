@@ -1,5 +1,6 @@
-import type { Element, LeafNode, Node, SplitNode, TemplateDefaults, TemplateDoc } from '../model/types'
+import type { Element, ImageBackground, LeafNode, Node, SplitNode, TemplateDefaults, TemplateDoc } from '../model/types'
 import { getNodeById, isLeaf, isSplit, updateNodeById } from '../model/ids'
+import { PROJECT_ELEMENT_DEFAULTS } from '../config/projectDefaults'
 
 export type SplitDirection = 'v' | 'h'
 
@@ -27,6 +28,20 @@ export function setSplitRatio(doc: TemplateDoc, nodeId: string, ratio: number): 
   return { ...doc, layout: updateNodeById(doc.layout, nodeId, (n) => (n.kind === 'split' ? { ...n, ratio } : n)) }
 }
 
+export function setNodeBackground(doc: TemplateDoc, nodeId: string, background: ImageBackground | undefined): TemplateDoc {
+  return { ...doc, layout: updateNodeById(doc.layout, nodeId, (node) => ({ ...node, background })) }
+}
+
+export function updateNodeBackground(doc: TemplateDoc, nodeId: string, patch: Partial<ImageBackground>): TemplateDoc {
+  const node = getNodeById(doc.layout, nodeId)
+  if (!node?.background) return doc
+  return setNodeBackground(doc, nodeId, { ...node.background, ...patch })
+}
+
+export function setSplitDirection(doc: TemplateDoc, nodeId: string, direction: SplitDirection): TemplateDoc {
+  return { ...doc, layout: updateNodeById(doc.layout, nodeId, (n) => (n.kind === 'split' ? { ...n, direction } : n)) }
+}
+
 export function setSplitGutter(doc: TemplateDoc, nodeId: string, gutter_mm: number | undefined): TemplateDoc {
   return { ...doc, layout: updateNodeById(doc.layout, nodeId, (n) => (n.kind === 'split' ? { ...n, gutter_mm } : n)) }
 }
@@ -39,16 +54,18 @@ export function splitLeaf(doc: TemplateDoc, nodeId: string, direction: SplitDire
   const target = getNodeById(doc.layout, nodeId)
   if (!target || !isLeaf(target)) return doc
 
-  const left: LeafNode = target
+  const { background, ...leafWithoutBackground } = target
+  const left: LeafNode = leafWithoutBackground
   const right: LeafNode = {
     kind: 'leaf',
     padding_mm: left.padding_mm,
     debug_border: left.debug_border,
-    elements: [{ type: 'text', text: '' }]
+    elements: [{ type: 'text', text: '', align_h: 'center', align_v: 'center' }]
   }
 
   const split: SplitNode = {
     kind: 'split',
+    background,
     direction,
     ratio: 0.5,
     gutter_mm: 0,
@@ -68,6 +85,7 @@ export function unsplit(doc: TemplateDoc, nodeId: string): TemplateDoc {
 
   const merged: LeafNode = {
     kind: 'leaf',
+    background: target.background ?? firstLeaf.background,
     padding_mm: firstLeaf.padding_mm,
     debug_border: firstLeaf.debug_border,
     elements: firstLeaf.elements
@@ -97,9 +115,13 @@ export function updateLeafElement(doc: TemplateDoc, nodeId: string, patch: Parti
 }
 
 export function makeDefaultElement(type: Element['type']): Element {
-  if (type === 'text') return { type: 'text', text: '' }
-  if (type === 'qr') return { type: 'qr', data: '' }
-  if (type === 'datamatrix') return { type: 'datamatrix', data: '', module_size_mm: 0.5, quality: 200 }
-  if (type === 'image') return { type: 'image', source: { kind: 'base64', data: '' } }
+  if (type === 'text') return { type: 'text', text: '', align_h: 'center', align_v: 'center' }
+  if (type === 'qr') return { type: 'qr', data: '', align_h: 'center', align_v: 'center', render_mode: PROJECT_ELEMENT_DEFAULTS.qr?.render_mode ?? 'image' }
+  if (type === 'datamatrix') {
+    return { type: 'datamatrix', data: 'DataMatrix', module_size_mm: 0.5, quality: 200, align_h: 'center', align_v: 'center', render_mode: PROJECT_ELEMENT_DEFAULTS.datamatrix?.render_mode ?? 'image' }
+  }
+  if (type === 'image') {
+    return { type: 'image', source: { kind: 'base64', data: '' }, align_h: 'center', align_v: 'center' }
+  }
   return { type: 'line', orientation: 'h', thickness_mm: 0.3, align: 'center' }
 }

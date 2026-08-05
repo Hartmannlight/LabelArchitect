@@ -41,7 +41,8 @@ Wenn du den anderen Teil des Frontends bauen willst, solltest du hier verstehen:
 
 - Visueller Split-Layout-Editor (vertikal/horizontal) mit Drag-Handles und optionalem Snap.
 - Ein Element pro Leaf: Text, QR, DataMatrix, Image, Line.
-- Eigenschaften-Panel fuer Split, Leaf, Element und Template-Defaults.
+- Elementzentriertes Eigenschaften-Panel mit wichtigen Einstellungen zuerst und seltenen Optionen in aufklappbaren Bereichen.
+- Geführter Assistent für dynamische Felder und automatische PrintHub-Werte.
 - Import/Export von JSON.
 - Backend-Template-Store (list/save/load) inkl. Tags, Variablen-Definitionen und Sample-Daten.
 - Print-Handoff: Erzeugt einen Draft im Backend und leitet zur Operator-UI weiter.
@@ -55,7 +56,12 @@ Wichtig: Das Frontend erzeugt nur JSON. ZPL entsteht im Backend (siehe Render- u
 Der Editor besteht aus drei Hauptbereichen:
 - Links: Baumansicht der Layout-Knoten (`TreePanel`).
 - Mitte: Canvas-Editor (Layout in mm -> Pixel), plus Render-Preview.
-- Rechts: Properties + Defaults + Variablen.
+- Rechts: Properties des ausgewählten Elements sowie ein geführter Bereich für dynamische Daten.
+
+Die globalen Designer-Defaults werden nicht in der Weboberfläche bearbeitet. Sie
+liegen in `src/config/designer-defaults.yml` und werden beim Start des Projekts
+eingelesen. Neue und geladene Templates verwenden damit dieselbe zentrale
+Grundkonfiguration.
 
 State-Management laeuft ueber Zustand (`src/state/store.ts`) mit:
 - `history`: undo/redo mit immutable operations (`src/state/operations.ts`).
@@ -149,7 +155,8 @@ Das heisst: Preview ist end-to-end, aber extern von Labelary abhaengig.
   - Ctrl/Cmd+N: neues Template
   - Ctrl/Cmd+I: Import
   - Ctrl/Cmd+E: Export
-  - s/v/h/t/q/d/i/l: Tool-Wechsel (wenn kein Input fokussiert)
+- v/h/t/q/d/i/l: Split V, Split H, Text, QR, DataMatrix, Image und Line (wenn kein Eingabefeld fokussiert)
+- Escape: zurück zum Auswahlwerkzeug
 
 ## Lokal starten
 

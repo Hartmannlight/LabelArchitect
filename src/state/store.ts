@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { LabelPreviewTarget, TemplateDoc } from '../model/types'
+import type { ImageBackground, LabelPreviewTarget, Node, TemplateDoc } from '../model/types'
 import { validateTemplate } from '../model/schema'
 import { listNodes } from '../model/ids'
+import { cloneProjectDefaults, PROJECT_ELEMENT_DEFAULTS } from '../config/projectDefaults'
 import { makeHistory, push, redo, reset, undo, type HistoryState } from './history'
 import * as ops from './operations'
 
@@ -56,12 +57,16 @@ export type TemplateEditorState = {
   unsplitSelected: () => void
 
   setSplitRatio: (nodeId: string, ratio: number) => void
+  setSplitDirection: (nodeId: string, direction: 'v' | 'h') => void
   setSplitGutter: (nodeId: string, gutterMm: number) => void
   setSplitDividerVisible: (nodeId: string, visible: boolean) => void
   setSplitDividerThickness: (nodeId: string, thicknessMm: number) => void
 
   setAlias: (nodeId: string, alias: string) => void
   clearAlias: (nodeId: string) => void
+
+  setNodeBackground: (nodeId: string, background: ImageBackground | undefined) => void
+  patchNodeBackground: (nodeId: string, patch: Partial<ImageBackground>) => void
 
   setLeafPadding: (nodeId: string, padding: [number, number, number, number] | undefined) => void
   setLeafDebugBorder: (nodeId: string, value: boolean) => void
@@ -82,28 +87,7 @@ function defaultDoc(): TemplateDoc {
   return {
     schema_version: 1,
     name: 'New template',
-    defaults: {
-      leaf_padding_mm: [0.375, 0.375, 0.375, 0.375],
-      text: {
-        font_height_mm: 4.0,
-        wrap: 'word',
-        fit: 'shrink_to_fit',
-        max_lines: 1,
-        align_h: 'left',
-        align_v: 'top'
-      },
-      code2d: { quiet_zone_mm: 1.0, render_mode: 'zpl' },
-      image: {
-        fit: 'contain',
-        align_h: 'center',
-        align_v: 'center',
-        input_dpi: 203,
-        threshold: 128,
-        dither: 'none',
-        invert: false
-      },
-      render: { missing_variables: 'error', emit_ci28: true }
-    },
+    defaults: cloneProjectDefaults(),
     layout: {
       kind: 'leaf',
       alias: 'root',
@@ -111,6 +95,33 @@ function defaultDoc(): TemplateDoc {
       elements: [{ type: 'text', text: '' }]
     }
   }
+}
+
+function withProjectDefaults(doc: TemplateDoc): TemplateDoc {
+  const applyElementDefaults = (node: Node): Node => {
+    if (node.kind === 'split') {
+      return { ...node, children: [applyElementDefaults(node.children[0]), applyElementDefaults(node.children[1])] }
+    }
+    const element = node.elements[0]
+    if (element.type === 'qr' && element.render_mode === undefined) {
+      return { ...node, elements: [{ ...element, render_mode: PROJECT_ELEMENT_DEFAULTS.qr?.render_mode ?? 'image' }] }
+    }
+    if (element.type === 'datamatrix') {
+      const renderMode = element.render_mode ?? PROJECT_ELEMENT_DEFAULTS.datamatrix?.render_mode ?? 'image'
+      const needsGrid = renderMode === 'zpl' && element.size_mode === 'max'
+      return {
+        ...node,
+        elements: [{
+          ...element,
+          render_mode: renderMode,
+          columns: needsGrid ? (element.columns && element.columns > 0 ? element.columns : 10) : element.columns,
+          rows: needsGrid ? (element.rows && element.rows > 0 ? element.rows : 10) : element.rows
+        }]
+      }
+    }
+    return node
+  }
+  return { ...doc, defaults: cloneProjectDefaults(), layout: applyElementDefaults(doc.layout) }
 }
 
 const TEMPLATE_STORAGE_KEY = 'zplgrid_template_v1'
@@ -125,7 +136,7 @@ function loadStoredDoc(): TemplateDoc | null {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const res = validateTemplate(parsed)
-    return res.ok ? res.doc : null
+    return res.ok ? withProjectDefaults(res.doc) : null
   } catch {
     return null
   }
@@ -248,8 +259,9 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     toggleTheme: () => set((state) => ({ theme: state.theme === 'dark' ? 'light' : 'dark' })),
     setBackendTemplateId: (templateId) => set({ backendTemplateId: templateId }),
     loadTemplate: (doc) => {
-      const h = reset(get().history, doc)
-      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(doc) })
+      const normalized = withProjectDefaults(doc)
+      const h = reset(get().history, normalized)
+      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(normalized) })
     },
     setVariableValue: (key, value) =>
       set((state) => ({ variableValues: { ...state.variableValues, [key]: value } })),
@@ -302,6 +314,12 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     setSplitRatio: (nodeId, ratio) => {
       const h = get().history
       const next = ops.setSplitRatio(h.present, nodeId, ratio)
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
+    setSplitDirection: (nodeId, direction) => {
+      const h = get().history
+      const next = ops.setSplitDirection(h.present, nodeId, direction)
       set({ history: push(h, next), validationIssues: validate(next) })
     },
 
@@ -364,6 +382,18 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
       set({ history: push(h, next), validationIssues: validate(next) })
     },
 
+    setNodeBackground: (nodeId, background) => {
+      const h = get().history
+      const next = ops.setNodeBackground(h.present, nodeId, background)
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
+    patchNodeBackground: (nodeId, patch) => {
+      const h = get().history
+      const next = ops.updateNodeBackground(h.present, nodeId, patch)
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
     setLeafPadding: (nodeId, padding) => {
       const h = get().history
       const next = ops.setLeafPadding(h.present, nodeId, padding)
@@ -406,8 +436,9 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
         const value = JSON.parse(text)
         const res = validateTemplate(value)
         if (!res.ok) return { ok: false, issues: res.issues }
-        const h = reset(get().history, res.doc)
-        set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(res.doc), backendTemplateId: null })
+        const normalized = withProjectDefaults(res.doc)
+        const h = reset(get().history, normalized)
+        set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(normalized), backendTemplateId: null })
         return { ok: true }
       } catch (e: any) {
         return { ok: false, issues: [String(e?.message ?? e)] }

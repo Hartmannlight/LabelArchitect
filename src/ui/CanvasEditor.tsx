@@ -102,6 +102,26 @@ export default function CanvasEditor() {
         <Layer>
           <Rect x={ox} y={oy} width={artboardW} height={artboardH} fill={colors.artboard} stroke={colors.artboardStroke} strokeWidth={1} />
 
+          {layout.backgrounds.map((background, index) => (
+            <Group key={`${background.nodeId}:background`} listening={false}>
+              <Rect
+                x={ox + background.rect.x}
+                y={oy + background.rect.y}
+                width={background.rect.w}
+                height={background.rect.h}
+                fill={theme === 'light' ? '#dbeafe' : '#172554'}
+                opacity={Math.min(0.28 + index * 0.04, 0.48)}
+              />
+              <KText
+                x={ox + background.rect.x + 5}
+                y={oy + background.rect.y + Math.max(3, background.rect.h - 16)}
+                text={`Background - ${background.nodeId}`}
+                fontSize={9}
+                fill={theme === 'light' ? '#1d4ed8' : '#93c5fd'}
+              />
+            </Group>
+          ))}
+
           {layout.leaves.map((leaf) => {
             const isSelected = selection?.nodeId === leaf.nodeId
             const x = ox + leaf.rect.x
@@ -145,7 +165,7 @@ export default function CanvasEditor() {
                   height={h}
                   stroke={leafStroke}
                   strokeWidth={leafStrokeWidth}
-                  fill={colors.leafFill}
+                  fill='rgba(0,0,0,0)'
                 />
                 <Rect key={leaf.nodeId + ':content'} x={cx} y={cy} width={cw} height={ch} stroke={colors.contentStroke} strokeWidth={1} />
                 <KText key={leaf.nodeId + ':label'} x={cx + 4} y={cy + 4} text={label} fontSize={12} fill={colors.label} />

@@ -19,6 +19,7 @@ export default function LabelPreviewPanel() {
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
   const [status, setStatus] = useState<RenderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [diagnostics, setDiagnostics] = useState<string[]>([])
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const zoom = settings.previewZoom
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null)
@@ -41,8 +42,9 @@ export default function LabelPreviewPanel() {
       const startedAt = Date.now()
       setStatus('loading')
       setError(null)
+      setDiagnostics([])
       try {
-        const blob = await getRenderSdk().renders.renderPng({
+        const rendered = await getRenderSdk().renders.renderPngDetailed({
           template: doc,
           target: {
             width_mm: preview.width_mm,
@@ -54,7 +56,7 @@ export default function LabelPreviewPanel() {
           variables: renderVariables,
           debug: false
         })
-        const nextUrl = URL.createObjectURL(blob)
+        const nextUrl = URL.createObjectURL(rendered.blob)
         if (!active) {
           URL.revokeObjectURL(nextUrl)
           return
@@ -63,6 +65,7 @@ export default function LabelPreviewPanel() {
           if (prev) URL.revokeObjectURL(prev)
           return nextUrl
         })
+        setDiagnostics(rendered.diagnostics.map((item) => item.message))
         setStatus('idle')
       } catch (e: any) {
         if (controller.signal.aborted) return
@@ -136,12 +139,21 @@ export default function LabelPreviewPanel() {
             Reset
           </button>
         </div>
-        <div>
+        <div className='flex items-center gap-2'>
           {status === 'loading' && <span className='text-muted'>Rendering...</span>}
           {status === 'error' && <span className='text-danger'>Render failed: {error}</span>}
-          {status === 'idle' && <span className='text-subtle'>Updates 2s after last change</span>}
+          {status === 'idle' && diagnostics.length === 0 && <span className='text-subtle'>Updates 2s after last change</span>}
+          {status === 'idle' && diagnostics.length > 0 && <span className='text-warn' title={diagnostics.join('\n')}>⚠ Text overflow ({diagnostics.length})</span>}
         </div>
       </div>
+      {diagnostics.length > 0 && (
+        <div className='border-b border-[var(--border)] bg-[var(--warn-bg)] px-3 py-2 text-xs text-warn' role='status'>
+          <strong>Preview warnings</strong>
+          <ul className='list-disc pl-5'>
+            {diagnostics.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}
+          </ul>
+        </div>
+      )}
 
       <div className='flex-1 min-h-0 bg-[var(--panel-muted)]'>
         <div className='w-full h-full overflow-auto' onWheel={handleWheel}>

@@ -116,6 +116,18 @@ export type ImageElement = ElementBase & {
   invert?: boolean
 }
 
+export type ImageBackground = {
+  source: ImageSource
+  fit?: 'none' | 'contain' | 'cover' | 'stretch'
+  align_h?: 'left' | 'center' | 'right'
+  align_v?: 'top' | 'center' | 'bottom'
+  input_dpi?: number
+  threshold?: number
+  dither?: 'none' | 'floyd_steinberg' | 'bayer'
+  invert?: boolean
+  extensions?: Record<string, unknown>
+}
+
 export type LineElement = ElementBase & {
   type: 'line'
   orientation: 'h' | 'v'
@@ -128,6 +140,7 @@ export type Element = TextElement | QrElement | DataMatrixElement | ImageElement
 export type SplitNode = {
   kind: 'split'
   alias?: string
+  background?: ImageBackground
   direction: Direction
   ratio: number
   gutter_mm?: number
@@ -139,6 +152,7 @@ export type SplitNode = {
 export type LeafNode = {
   kind: 'leaf'
   alias?: string
+  background?: ImageBackground
   padding_mm?: PaddingMm
   debug_border?: boolean
   elements: [Element]

@@ -87,6 +87,18 @@ const imageElementSchema = elementBaseSchema.extend({
   invert: z.boolean().optional(),
 })
 
+const imageBackgroundSchema = z.object({
+  source: imageSourceSchema,
+  fit: z.enum(['none', 'contain', 'cover', 'stretch']).optional(),
+  align_h: z.enum(['left', 'center', 'right']).optional(),
+  align_v: z.enum(['top', 'center', 'bottom']).optional(),
+  input_dpi: z.number().int().min(1).optional(),
+  threshold: z.number().int().min(0).max(255).optional(),
+  dither: z.enum(['none', 'floyd_steinberg', 'bayer']).optional(),
+  invert: z.boolean().optional(),
+  extensions: z.record(z.unknown()).optional(),
+})
+
 const lineElementSchema = elementBaseSchema.extend({
   type: z.literal('line'),
   orientation: z.enum(['h', 'v']),
@@ -105,6 +117,7 @@ const elementSchema = z.discriminatedUnion('type', [
 const leafSchemaRaw = z.object({
   kind: z.literal('leaf'),
   alias: z.string().min(1).optional(),
+  background: imageBackgroundSchema.optional(),
   padding_mm: paddingMmSchema.optional(),
   debug_border: z.boolean().optional(),
   elements: z.tuple([elementSchema]),
@@ -117,6 +130,7 @@ const splitSchemaRaw: z.ZodTypeAny = z.lazy(() =>
   z.object({
     kind: z.literal('split'),
     alias: z.string().min(1).optional(),
+    background: imageBackgroundSchema.optional(),
     direction: z.enum(['v', 'h']),
     ratio: z.number().gt(0).lt(1),
     gutter_mm: z.number().min(0).optional(),
