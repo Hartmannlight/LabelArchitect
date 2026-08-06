@@ -1,5 +1,6 @@
 import type { LabelPreviewTarget, TemplateDoc } from './types'
 import { PROJECT_DEFAULTS } from '../config/projectDefaults'
+import { generalStarterTemplates } from './generalStarterTemplates'
 
 export type StarterTemplate = {
   id: string
@@ -14,7 +15,7 @@ export type StarterTemplate = {
 
 const defaults: TemplateDoc['defaults'] = PROJECT_DEFAULTS
 
-export const starterTemplates: StarterTemplate[] = [
+const domainStarterTemplates: StarterTemplate[] = [
   {
     id: 'asset-label',
     name: 'Asset label',
@@ -76,4 +77,9 @@ export const starterTemplates: StarterTemplate[] = [
       ] }
     }
   }
+]
+
+export const starterTemplates: StarterTemplate[] = [
+  ...generalStarterTemplates,
+  ...domainStarterTemplates,
 ]
