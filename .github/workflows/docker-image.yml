@@ -9,7 +9,7 @@ on:
       sdk_ref:
         description: PrintHub SDK branch or tag
         required: true
-        default: feat/sdk-api-adoption
+        default: main
 
 jobs:
   build:

@@ -2,15 +2,21 @@ import type { TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
 import { useCallback, useEffect, useState } from 'react'
 import { backendBase, buildApiUrl } from '../api/config'
 import { getBackendSdk } from '../api/sdk'
+import { errorText } from '../api/errorText'
+import { refreshPrinter, supportsLiveStatus } from '../api/printerRefresh'
+import { registryRequest } from '../api/printerRegistry'
+import { PrinterDiscoveryControls, PrinterSettingsEditor } from '../ui/PrinterRegistryControls'
 import { useTemplateEditorStore } from '../state/store'
 import { starterTemplates } from '../model/starterTemplates'
 import CanvasEditor from '../ui/CanvasEditor'
 import JsonDialog from '../ui/JsonDialog'
 import LabelPreviewPanel from '../ui/LabelPreviewPanel'
+import LabelSizeControls from '../ui/LabelSizeControls'
 import PropertiesPanel from '../ui/PropertiesPanel'
 import TemplateStoreDialog from '../ui/TemplateStoreDialog'
 import TreePanel from '../ui/TreePanel'
 import ValidationPanel from '../ui/ValidationPanel'
+import ToolbarPopover from '../ui/ToolbarPopover'
 
 type View = 'templates' | 'print' | 'designer' | 'printers'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
@@ -29,7 +35,6 @@ const navigate = (view: View) => {
   window.history.pushState({}, '', url)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
-const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 function Brand() {
   return <div className='studio-brand'><div className='studio-mark' aria-hidden='true'>P</div><div><strong>PrintHub Studio</strong><span>Design, fill and print labels</span></div></div>
@@ -66,23 +71,25 @@ function useTemplates() {
 
 function usePrinters() {
   const [printers, setPrinters] = useState<Array<Record<string, any>>>([])
+  const [defaultPrinterId, setDefaultPrinterId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const refresh = async () => {
     setLoading(true); setError(null)
-    try { const response = await getBackendSdk().printers.list(); setPrinters((response.printers ?? []) as Array<Record<string, any>>) }
+    try { const response = await getBackendSdk().printers.list(); setPrinters((response.printers ?? []) as Array<Record<string, any>>); setDefaultPrinterId((response as { default_printer_id?: string | null }).default_printer_id ?? null) }
     catch (reason) { setError(errorText(reason)) }
     finally { setLoading(false) }
   }
   useEffect(() => void refresh(), [])
-  return { printers, loading, error, refresh }
+  const updatePrinter = (printer: Record<string, any>) => setPrinters((current) => current.map((entry) => entry.id === printer.id ? printer : entry))
+  return { printers, defaultPrinterId, loading, error, refresh, updatePrinter }
 }
 
 function printerRenderTarget(printer: Record<string, any> | undefined, fallback: Record<string, any>) {
   const widthMm = Number(printer?.media?.loaded?.width_mm)
   const heightMm = Number(printer?.media?.loaded?.height_mm)
   const dpi = Number(printer?.alignment?.dpi)
-  if (!(widthMm > 0) || !(heightMm > 0) || !(dpi > 0)) return fallback
+  if (!(widthMm > 0) || !(heightMm > 0) || !(dpi > 0)) return printer?.connection?.protocol === 'zebra_tamer' ? null : fallback
   return {
     width_mm: widthMm,
     height_mm: heightMm,
@@ -158,7 +165,11 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
   const [printerId, setPrinterId] = useState(() => localStorage.getItem('printhub:printer') ?? '')
   const [values, setValues] = useState<Record<string, string>>({}); const [previewUrl, setPreviewUrl] = useState<string | null>(null); const [busy, setBusy] = useState<'preview' | 'print' | null>(null); const [printWarnings, setPrintWarnings] = useState<string[]>([])
   const draftId = new URLSearchParams(window.location.search).get('draft_id')
-  useEffect(() => { if (!printerId && printerData.printers.length) setPrinterId(String(printerData.printers[0].id)) }, [printerData.printers, printerId])
+  useEffect(() => {
+    if (printerData.loading || printerData.error) return
+    const enabled = printerData.printers.filter((printer) => printer.enabled !== false)
+    if (!enabled.some((printer) => String(printer.id) === printerId)) setPrinterId(printerData.defaultPrinterId ?? String(enabled[0]?.id ?? ''))
+  }, [printerData.printers, printerData.defaultPrinterId, printerData.loading, printerData.error, printerId])
   useEffect(() => {
     if (!templateId) { if (!draftId) setTemplate(null); return }
     getBackendSdk().templates.get(templateId).then((detail) => { setTemplate(detail); const sample = detail.sample_data ?? {}; const next: Record<string, string> = {}; (detail.variables ?? []).forEach((variable: any) => { const name = String(variable.name ?? ''); if (name) next[name] = String((sample as any)[name] ?? variable.default ?? '') }); setValues(next) }).catch((reason) => onNotice({ tone: 'error', text: errorText(reason) }))
@@ -179,8 +190,9 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
     {template && renderTarget && <div className='selected-template'><strong>{template.name}</strong><span>{String(renderTarget.width_mm)} × {String(renderTarget.height_mm)} mm · printer media</span></div>}
     <div className='variable-form'>{(template?.variables ?? []).filter((entry: any) => !String(entry.name ?? '').startsWith('_')).map((entry: any) => <FieldInput key={String(entry.name)} definition={entry} value={values[String(entry.name)] ?? ''} onChange={(value) => setValues((current) => ({ ...current, [String(entry.name)]: value }))} />)}</div>
     <label className='field'><span>Printer</span><select value={printerId} onChange={(event) => setPrinterId(event.target.value)}><option value=''>Choose a printer…</option>{printerData.printers.filter((printer) => printer.enabled !== false).map((printer) => <option key={printer.id} value={printer.id}>{printer.name ?? printer.id}</option>)}</select></label>
+    {selectedPrinter?.connection?.protocol === 'zebra_tamer' && template && !renderTarget && <p role='status'>Loaded media or resolution is unavailable. Configure the roll in ZebraTamer and refresh the printers before printing.</p>}
     {printWarnings.length > 0 && <div className='builder-warning' role='status'><strong>Text layout warnings</strong><ul className='list-disc pl-5'>{printWarnings.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul></div>}
-    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!template || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!template || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
+    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!template || !renderTarget || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!template || !renderTarget || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
   </section><section className='print-preview' aria-label='Label preview'>{previewUrl ? <img src={previewUrl} alt='Rendered label preview' /> : <div className='preview-placeholder'>{template && renderTarget ? `Tap Preview to render for ${renderTarget.width_mm} × ${renderTarget.height_mm} mm` : 'Select a template'}</div>}</section></div></main>
 }
 
@@ -188,6 +200,8 @@ function Designer() {
   const doc = useTemplateEditorStore((state) => state.history.present); const tool = useTemplateEditorStore((state) => state.tool); const setTool = useTemplateEditorStore((state) => state.setTool); const undo = useTemplateEditorStore((state) => state.undo); const redo = useTemplateEditorStore((state) => state.redo); const newTemplate = useTemplateEditorStore((state) => state.newTemplate); const issues = useTemplateEditorStore((state) => state.validationIssues)
   const [storeOpen, setStoreOpen] = useState(false); const [jsonMode, setJsonMode] = useState<'export' | 'import' | null>(null)
   const [canvasSplit, setCanvasSplit] = useState(0.5); const [resizingCanvas, setResizingCanvas] = useState(false)
+  const canUndo = useTemplateEditorStore((state) => state.history.past.length > 0)
+  const canRedo = useTemplateEditorStore((state) => state.history.future.length > 0)
   const tools = [['select', 'Select', 'Esc'], ['split_v', 'Split ↔', 'V'], ['split_h', 'Split ↕', 'H'], ['place_text', 'Text', 'T'], ['place_qr', 'QR', 'Q'], ['place_dm', 'DataMatrix', 'D'], ['place_image', 'Image', 'I'], ['place_line', 'Line', 'L']] as const
   useEffect(() => { const handler = (event: KeyboardEvent) => {
     const target = event.target as HTMLElement | null
@@ -206,23 +220,63 @@ function Designer() {
     if (nextTool) { event.preventDefault(); setTool(nextTool) }
   }; window.addEventListener('keydown', handler); return () => window.removeEventListener('keydown', handler) }, [redo, setTool, undo])
   return <main className='designer-page'><div className='mobile-designer-warning'><strong>Designer is made for desktop.</strong><span>Use Quick print on this device to fill and print existing templates.</span><button type='button' className='primary-action' onClick={() => navigate('print')}>Open Quick print</button></div>
-    <header className='designer-header'><div><span className='eyebrow'>Desktop designer</span><input aria-label='Template name' value={doc.name ?? ''} onChange={(event) => useTemplateEditorStore.getState().setTemplateName(event.target.value)} /></div><div className='designer-actions'><button type='button' onClick={newTemplate}>New</button><button type='button' onClick={() => setJsonMode('import')}>Import</button><button type='button' onClick={() => setJsonMode('export')}>Export</button><button type='button' className='primary-action' onClick={() => setStoreOpen(true)}>Save template</button></div></header>
-    <div className='designer-toolbar' aria-label='Designer tools'>{tools.map(([key, label, shortcut]) => <button type='button' key={key} className={tool === key ? 'active' : ''} onClick={() => setTool(key)}><span>{label}</span><kbd>{shortcut}</kbd></button>)}<span className='toolbar-spacer' /><button type='button' onClick={undo}>Undo</button><button type='button' onClick={redo}>Redo</button></div>
+    <header className='designer-header'>
+      <input className='designer-name' aria-label='Template name' title={doc.name || 'Template name'} value={doc.name ?? ''} onChange={(event) => useTemplateEditorStore.getState().setTemplateName(event.target.value)} />
+      <LabelSizeControls />
+      <div className='designer-toolbar' role='group' aria-label='Designer tools'>{tools.map(([key, label, shortcut]) => <button type='button' key={key} className={tool === key ? 'active' : ''} aria-pressed={tool === key} title={`${label} (${shortcut})`} onClick={() => setTool(key)}>{label}</button>)}</div>
+      <div className='designer-actions'>
+        <button type='button' className='designer-icon-button' aria-label='Undo' title='Undo (Ctrl+Z)' disabled={!canUndo} onClick={undo}>↶</button>
+        <button type='button' className='designer-icon-button' aria-label='Redo' title='Redo (Ctrl+Shift+Z)' disabled={!canRedo} onClick={redo}>↷</button>
+        <ToolbarPopover label='Template actions' trigger={<span aria-hidden='true'>⋯</span>} align='right'>{(close) => <div className='designer-file-actions'>
+          <button type='button' onClick={() => { close(); newTemplate() }}>New template</button>
+          <button type='button' onClick={() => { close(); setJsonMode('import') }}>Import JSON</button>
+          <button type='button' onClick={() => { close(); setJsonMode('export') }}>Export JSON</button>
+        </div>}</ToolbarPopover>
+        <button type='button' className='primary-action' title='Save template (Ctrl+S)' onClick={() => setStoreOpen(true)}>Save template</button>
+      </div>
+    </header>
     <div className='designer-workspace'><aside><TreePanel /></aside><section className={`canvas-stack${resizingCanvas ? ' resizing' : ''}`} style={{ gridTemplateRows: `minmax(160px, ${canvasSplit}fr) 12px minmax(160px, ${1 - canvasSplit}fr)` }}><div className='canvas-surface'><CanvasEditor /></div><div className='canvas-resizer' role='separator' aria-label='Resize label editor and preview' aria-orientation='horizontal' aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(canvasSplit * 100)} tabIndex={0} onDoubleClick={() => setCanvasSplit(0.5)} onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setResizingCanvas(true) }} onPointerMove={(event) => { if (!resizingCanvas) return; const bounds = event.currentTarget.parentElement?.getBoundingClientRect(); if (!bounds) return; setCanvasSplit(Math.min(0.75, Math.max(0.25, (event.clientY - bounds.top) / bounds.height))) }} onPointerUp={(event) => { setResizingCanvas(false); event.currentTarget.releasePointerCapture(event.pointerId) }} onLostPointerCapture={() => setResizingCanvas(false)} onKeyDown={(event) => { if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return; event.preventDefault(); setCanvasSplit((current) => event.key === 'Home' ? 0.5 : Math.min(0.75, Math.max(0.25, current + (event.key === 'ArrowDown' ? 0.05 : -0.05)))) }} title='Drag to resize. Double-click to reset.'><span /></div><div className='render-surface'><LabelPreviewPanel /></div></section><aside className='properties-surface'><PropertiesPanel /></aside></div><footer className='designer-status'><ValidationPanel issues={issues} /></footer>{storeOpen && <TemplateStoreDialog onClose={() => setStoreOpen(false)} />}{jsonMode && <JsonDialog mode={jsonMode} onClose={() => setJsonMode(null)} />}</main>
 }
 
 function Printers({ onNotice }: { onNotice: (notice: Notice) => void }) {
-  const printerData = usePrinters(); const [agents, setAgents] = useState<Array<Record<string, any>>>([]); const [discovering, setDiscovering] = useState(false); const [status, setStatus] = useState<Record<string, any>>({}); const [jobs, setJobs] = useState<PrintJob[]>([])
+  const printerData = usePrinters(); const [editingPrinter, setEditingPrinter] = useState<Record<string, any> | null>(null); const [status, setStatus] = useState<Record<string, any>>({}); const [jobs, setJobs] = useState<PrintJob[]>([])
+  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({})
   const refreshJobs = useCallback(async () => { try { setJobs(await getBackendSdk().printJobs.list(20)) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }, [onNotice])
   useEffect(() => { void refreshJobs() }, [refreshJobs])
-  const discover = async () => { setDiscovering(true); try { const response = await fetch(buildApiUrl(backendBase, '/v1/zebra-tamer/agents')); if (!response.ok) throw new Error(await response.text()); const body = await response.json(); setAgents(body.agents ?? []) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setDiscovering(false) } }
-  const register = async (baseUrl: string, agentPrinter: Record<string, any>) => { const id = String(agentPrinter.id); try { await getBackendSdk().printers.upsert(id, { id, name: agentPrinter.display_name ?? id, model: 'Zebra via ZebraTamer', vendor: 'Zebra', driver: 'zpl', connection: { protocol: 'zebra_tamer', base_url: baseUrl, printer_id: id, timeout_ms: 10000 }, media: { loaded: { width_mm: 50, height_mm: 25, color: 'white', type: 'thermal' } }, alignment: { dpi: 203, offset_x_mm: 0, offset_y_mm: 0 }, zpl: { darkness: 10, print_speed: 3, print_mode: 'tear_off' }, defaults: { copies: 1, rotation: 0 }, capabilities: { supports_status: true, supports_graphics: true, supports_cut: false }, enabled: true }); await printerData.refresh(); onNotice({ tone: 'success', text: `${agentPrinter.display_name ?? id} added to PrintHub.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
-  const refreshStatus = async (printerId: string) => { try { const result = await getBackendSdk().printers.getStatus(printerId); setStatus((current) => ({ ...current, [printerId]: result })) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
+  const editPrinter = async (id: string) => { try { setEditingPrinter(await registryRequest(backendBase, `/v1/printers/${encodeURIComponent(id)}/configuration`, undefined, 'GET')) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
+  const refreshStatus = async (printerId: string) => {
+    setRefreshing((current) => ({ ...current, [printerId]: true }))
+    try {
+      const result = await refreshPrinter(printerId, getBackendSdk().printers)
+      printerData.updatePrinter(result.printer)
+      setStatus((current) => ({ ...current, [printerId]: result.status }))
+      onNotice({ tone: 'success', text: result.status ? 'Printer status refreshed.' : 'Printer details and media refreshed. Live status is unavailable for this printer.' })
+    } catch (reason) {
+      setStatus((current) => ({ ...current, [printerId]: null }))
+      onNotice({ tone: 'error', text: errorText(reason) })
+    } finally { setRefreshing((current) => ({ ...current, [printerId]: false })) }
+  }
   const retry = async (jobId: string) => { try { await getBackendSdk().printJobs.retry(jobId); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} retried.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
-  return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>Printer fleet</span><h1>One place for every label printer</h1><p>ZebraTamer owns device I/O and status. PrintHub owns templates, rendering and print workflows.</p></div><button type='button' className='primary-action' onClick={() => void discover()}>{discovering ? 'Discovering…' : 'Discover ZebraTamer'}</button></header>
-    {agents.length > 0 && <section className='discovery-panel'><h2>Discovered agents</h2>{agents.map((agent) => <div className='agent-row' key={agent.base_url}><div><strong>{agent.base_url}</strong><span>{agent.available ? `${agent.printers.length} printer(s)` : agent.error}</span></div><div>{(agent.printers ?? []).map((printer: any) => <button type='button' key={printer.id} onClick={() => void register(agent.base_url, printer)}>Add {printer.display_name ?? printer.id}</button>)}</div></div>)}</section>}
+  return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>Printer fleet</span><h1>One place for every label printer</h1><p>One persistent inventory. Discover printers, preserve their settings, and keep offline devices registered.</p></div></header>
+    <PrinterDiscoveryControls onChanged={printerData.refresh} onNotice={onNotice} />
+    {editingPrinter && <PrinterSettingsEditor key={editingPrinter.id} printer={editingPrinter} onChanged={printerData.refresh} onNotice={onNotice} onClose={() => setEditingPrinter(null)} />}
     {printerData.loading && <div className='empty-state'>Loading printers…</div>}{printerData.error && <div className='empty-state error-state'>{printerData.error}</div>}
-    <div className='printer-grid'>{printerData.printers.map((printer) => { const summary = status[printer.id]?.normalized?.summary; return <article className='printer-card' key={printer.id}><div className='printer-state'><span className={summary?.ready === false ? 'state-dot warning' : 'state-dot'} />{summary?.ready === false ? 'Attention' : 'Configured'}</div><h2>{printer.name ?? printer.id}</h2><p>{printer.connection?.protocol === 'zebra_tamer' ? `ZebraTamer · ${printer.connection.base_url}` : `${printer.connection?.host}:${printer.connection?.port}`}</p><dl><div><dt>Media</dt><dd>{printer.media?.loaded?.width_mm} × {printer.media?.loaded?.height_mm} mm</dd></div><div><dt>Resolution</dt><dd>{printer.alignment?.dpi} dpi</dd></div>{summary?.model && <div><dt>Model</dt><dd>{summary.model}</dd></div>}</dl><button type='button' onClick={() => void refreshStatus(String(printer.id))}>Refresh status</button></article> })}</div>
+    <div className='printer-grid'>{printerData.printers.map((printer) => {
+      const summary = status[printer.id]?.normalized?.summary
+      const liveStatus = supportsLiveStatus(printer)
+      const attention = summary?.ready === false || summary?.has_errors === true
+      const state = printer.enabled === false ? 'Disabled' : printer.discovery?.available === false ? 'Offline' : attention ? 'Attention' : summary?.ready === true ? 'Ready' : 'Configured'
+      return <article className='printer-card' key={printer.id}>
+        <div className='printer-state'><span className={`state-dot ${state === 'Attention' ? 'warning' : state === 'Ready' ? '' : 'unknown'}`} />{state}</div>
+        <h2>{printer.name ?? printer.id}</h2><p>{printer.connection?.protocol === 'zebra_tamer' ? `ZebraTamer · ${printer.connection.base_url}` : `${printer.connection?.host}:${printer.connection?.port}`}</p>
+        {printer.discovery?.available === false && <p className='printer-status-hint'>{printer.discovery.error} Saved settings are retained.</p>}
+        <dl><div><dt>Media</dt><dd>{printer.media?.loaded ? `${printer.media.loaded.width_mm} × ${printer.media.loaded.height_mm} mm · ${printer.media.loaded.color}` : 'No live media information'}</dd></div><div><dt>Resolution</dt><dd>{printer.alignment?.dpi ? `${printer.alignment.dpi} dpi` : 'Unknown'}</dd></div>{summary?.model && <div><dt>Model</dt><dd>{summary.model}</dd></div>}</dl>
+        {printer.connection?.protocol === 'zebra_tamer' && <a href={`${printer.connection.base_url}/ui/?printer=${encodeURIComponent(String(printer.connection.printer_id))}`} target='_blank' rel='noreferrer'>Manage device and loaded roll in ZebraTamer</a>}
+        {!liveStatus && <p className='printer-status-hint'>{printer.enabled === false ? 'This printer is disabled.' : 'This printer does not support live status.'} You can still refresh its details and media.</p>}
+        <button type='button' disabled={refreshing[printer.id]} onClick={() => void refreshStatus(String(printer.id))}>{refreshing[printer.id] ? 'Refreshing…' : liveStatus ? 'Refresh status' : 'Refresh details'}</button>
+        <button type='button' onClick={() => void editPrinter(String(printer.id))}>Edit settings</button>
+      </article>
+    })}</div>
     <section className='jobs-panel'><div className='section-heading'><div><h2>Recent print jobs</h2><p>Failed jobs remain visible and can be retried safely.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></div>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <article className='job-row' key={job.id}><div><strong>{job.template_id}</strong><span>{job.printer_id} · attempt {job.attempts}</span>{job.error && <small>{job.error}</small>}</div><div><span className={`job-state state-${job.status}`}>{job.status.replace('_', ' ')}</span>{(job.status === 'failed' || job.status === 'outcome_unknown') && <button type='button' onClick={() => void retry(job.id)}>Retry</button>}</div></article>)}</div>}</section></main>
 }
 

@@ -143,7 +143,7 @@ export default function LabelPreviewPanel() {
           {status === 'loading' && <span className='text-muted'>Rendering...</span>}
           {status === 'error' && <span className='text-danger'>Render failed: {error}</span>}
           {status === 'idle' && diagnostics.length === 0 && <span className='text-subtle'>Updates 2s after last change</span>}
-          {status === 'idle' && diagnostics.length > 0 && <span className='text-warn' title={diagnostics.join('\n')}>⚠ Text overflow ({diagnostics.length})</span>}
+          {status === 'idle' && diagnostics.length > 0 && <span className='text-warn' title={diagnostics.join('\n')}>⚠ Label warnings ({diagnostics.length})</span>}
         </div>
       </div>
       {diagnostics.length > 0 && (
