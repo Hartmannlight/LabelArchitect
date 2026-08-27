@@ -29,6 +29,7 @@ jobs:
       - name: Resolve pinned SDK revision
         id: sdk
         shell: bash
+        working-directory: ${{ github.workspace }}
         run: |
           ref=$(cat workspace/LabelArchitect/.github/sdk-revision)
           [[ "$ref" =~ ^[a-f0-9]{40}$ ]]
