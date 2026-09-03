@@ -75,7 +75,7 @@ export const generalStarterTemplates: StarterTemplate[] = [
     tags: ['allgemein', 'text', 'notiz'],
     target,
     variables: [
-      { name: 'text', label: 'Text', type: 'text', mode: 'required', placeholder: 'Beliebigen Text eingeben' },
+      { name: 'text', label: 'Text', type: 'textarea', rows: 5, mode: 'required', placeholder: 'Beliebigen Text eingeben' },
     ],
     sampleData: { text: 'Nur passende Akkus verwenden.\nNach Gebrauch ausschalten.' },
     template: doc('Freitext', textLeaf('{text}', 'text', {
@@ -110,7 +110,7 @@ export const generalStarterTemplates: StarterTemplate[] = [
     tags: ['allgemein', 'kabel', 'fahne'],
     target,
     variables: [
-      { name: 'text', label: 'Beschriftung', type: 'text', mode: 'required', placeholder: 'Router · Port 4' },
+      { name: 'text', label: 'Beschriftung', type: 'textarea', rows: 3, mode: 'required', placeholder: 'Router · Port 4' },
     ],
     sampleData: { text: 'ROUTER\nPORT 4' },
     template: doc('Kabelfahne · gleicher Text', split(

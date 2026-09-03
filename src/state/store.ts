@@ -233,7 +233,7 @@ function validate(doc: TemplateDoc): string[] {
 
 export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => {
   const initial = loadStoredDoc() ?? defaultDoc()
-  const initialTheme = loadStoredTheme() ?? 'dark'
+  const initialTheme = loadStoredTheme() ?? 'light'
   const initialPreview = loadStoredPreview() ?? { width_mm: 74, height_mm: 26, dpi: 203 }
   const initialVariables = loadStoredVariables() ?? {}
   return {

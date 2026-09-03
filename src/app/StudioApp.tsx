@@ -1,13 +1,12 @@
 import type { TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
 import { useCallback, useEffect, useState } from 'react'
-import { backendBase, buildApiUrl } from '../api/config'
+import { backendBase, labelSizePresets } from '../api/config'
 import { getBackendSdk } from '../api/sdk'
 import { errorText } from '../api/errorText'
 import { refreshPrinter, supportsLiveStatus } from '../api/printerRefresh'
 import { registryRequest } from '../api/printerRegistry'
 import { PrinterDiscoveryControls, PrinterSettingsEditor } from '../ui/PrinterRegistryControls'
 import { useTemplateEditorStore } from '../state/store'
-import { starterTemplates } from '../model/starterTemplates'
 import CanvasEditor from '../ui/CanvasEditor'
 import JsonDialog from '../ui/JsonDialog'
 import LabelPreviewPanel from '../ui/LabelPreviewPanel'
@@ -21,6 +20,8 @@ import ToolbarPopover from '../ui/ToolbarPopover'
 type View = 'templates' | 'print' | 'designer' | 'printers'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
 type PrintJob = { id: string; status: string; printer_id: string; template_id: string; attempts: number; error?: string | null; created_at: string }
+type RenderTarget = { width_mm: number; height_mm: number; dpi: number; origin_x_mm: number; origin_y_mm: number }
+type OutputSizeMode = 'template' | 'printer' | 'custom'
 
 const currentView = (): View => {
   if (new URLSearchParams(window.location.search).get('draft_id')) return 'print'
@@ -42,7 +43,7 @@ function Brand() {
 
 function AppNav({ view }: { view: View }) {
   const entries: Array<[View, string, string]> = [
-    ['templates', 'Templates', 'Library and starter designs'],
+    ['templates', 'Templates', 'Ready to fill and print'],
     ['print', 'Quick print', 'Fill and send a label'],
     ['designer', 'Designer', 'Desktop label editor'],
     ['printers', 'Printers', 'ZebraTamer and direct printers']
@@ -85,11 +86,11 @@ function usePrinters() {
   return { printers, defaultPrinterId, loading, error, refresh, updatePrinter }
 }
 
-function printerRenderTarget(printer: Record<string, any> | undefined, fallback: Record<string, any>) {
+function printerRenderTarget(printer: Record<string, any> | undefined): RenderTarget | null {
   const widthMm = Number(printer?.media?.loaded?.width_mm)
   const heightMm = Number(printer?.media?.loaded?.height_mm)
   const dpi = Number(printer?.alignment?.dpi)
-  if (!(widthMm > 0) || !(heightMm > 0) || !(dpi > 0)) return printer?.connection?.protocol === 'zebra_tamer' ? null : fallback
+  if (!(widthMm > 0) || !(heightMm > 0) || !(dpi > 0)) return null
   return {
     width_mm: widthMm,
     height_mm: heightMm,
@@ -101,13 +102,22 @@ function printerRenderTarget(printer: Record<string, any> | undefined, fallback:
 
 function TemplatePreview({ templateId, available }: { templateId: string; available?: boolean }) {
   const [url, setUrl] = useState<string | null>(null)
+  const [sampleText, setSampleText] = useState<string | null>(null)
   useEffect(() => {
     let objectUrl: string | null = null; let active = true
-    if (available === false) return
+    setUrl(null); setSampleText(null)
+    if (available === false) {
+      getBackendSdk().templates.get(templateId).then((detail) => {
+        if (!active) return
+        const text = Object.values(detail.sample_data ?? {}).filter((value) => typeof value === 'string' || typeof value === 'number').map(String).join('\n').trim()
+        setSampleText(text || detail.name)
+      }).catch(() => setSampleText(null))
+      return () => { active = false }
+    }
     getBackendSdk().templates.getPreview(templateId).then((blob) => { if (!active) return; objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) }).catch(() => setUrl(null))
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [available, templateId])
-  return url ? <img src={url} alt='' /> : <div className='preview-placeholder'>Preview</div>
+  return url ? <img src={url} alt='' /> : sampleText ? <div className='template-text-preview' aria-label='Template sample preview'>{sampleText}</div> : <div className='preview-placeholder'>Preview</div>
 }
 
 function TemplateLibrary({ onNotice }: { onNotice: (notice: Notice) => void }) {
@@ -125,26 +135,8 @@ function TemplateLibrary({ onNotice }: { onNotice: (notice: Notice) => void }) {
       navigate('designer')
     } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) }
   }
-  const startWith = (presetId: string) => {
-    const preset = starterTemplates.find((entry) => entry.id === presetId)
-    if (!preset) return
-    const template = structuredClone(preset.template)
-    template.extensions = {
-      ...(template.extensions ?? {}),
-      printhub: {
-        variables: preset.variables,
-        sample_data: preset.sampleData,
-        tags: preset.tags
-      }
-    }
-    loadTemplate(template)
-    setBackendTemplateId(null)
-    setPreviewTarget(preset.target)
-    navigate('designer')
-  }
   return <main className='page-shell'>
-    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Start from a label that already works</h1><p>Templates are reusable outside Thingdex. Fill them here, from another app, or through the PrintHub API.</p></div><button className='primary-action' type='button' onClick={() => navigate('designer')}>New template</button></header>
-    <section className='starter-section'><div className='section-heading'><div><h2>Starter designs</h2><p>Typed fields make these templates easy to fill manually or bind from Thingdex.</p></div></div><div className='starter-grid'>{starterTemplates.map((preset) => <button type='button' key={preset.id} onClick={() => startWith(preset.id)}><strong>{preset.name}</strong><span>{preset.description}</span><small>{preset.target.width_mm} × {preset.target.height_mm} mm · {preset.variables.length} fields</small></button>)}</div></section>
+    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Choose a template and print</h1><p>Every template shown here is ready to fill and print directly.</p></div><button className='primary-action' type='button' onClick={() => navigate('designer')}>New template</button></header>
     <div className='library-toolbar'><label><span className='sr-only'>Search templates</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search saved templates and tags' /></label><button type='button' onClick={refresh}>Refresh</button></div>
     {loading && <div className='empty-state'>Loading templates…</div>}{error && <div className='empty-state error-state'>{error}</div>}
     {!loading && !error && !filtered.length && <div className='empty-state'>No matching templates. Create the first one in Designer.</div>}
@@ -155,7 +147,93 @@ function TemplateLibrary({ onNotice }: { onNotice: (notice: Notice) => void }) {
 function FieldInput({ definition, value, onChange }: { definition: Record<string, any>; value: string; onChange: (value: string) => void }) {
   const name = String(definition.name ?? ''); const type = String(definition.type ?? 'text'); const label = String(definition.label ?? name.replace(/[_.-]/g, ' ')); const required = definition.mode === 'required' || definition.required === true
   if (Array.isArray(definition.options)) return <label className='field'><span>{label}{required ? ' *' : ''}</span><select value={value} required={required} onChange={(event) => onChange(event.target.value)}><option value=''>Choose…</option>{definition.options.map((option: unknown) => <option key={String(option)} value={String(option)}>{String(option)}</option>)}</select></label>
+  if (type === 'textarea' || type === 'multiline') return <label className='field'><span>{label}{required ? ' *' : ''}</span><textarea rows={Math.max(2, Number(definition.rows) || 4)} value={value} required={required} placeholder={String(definition.placeholder ?? '')} onChange={(event) => onChange(event.target.value)} /></label>
   return <label className='field'><span>{label}{required ? ' *' : ''}</span><input type={['number', 'date', 'url'].includes(type) ? type : 'text'} value={value} required={required} placeholder={String(definition.placeholder ?? '')} onChange={(event) => onChange(event.target.value)} /></label>
+}
+
+function templateRenderTarget(value: Record<string, any>): RenderTarget {
+  return {
+    width_mm: Number(value.width_mm),
+    height_mm: Number(value.height_mm),
+    dpi: Number(value.dpi || 203),
+    origin_x_mm: Number(value.origin_x_mm ?? 0),
+    origin_y_mm: Number(value.origin_y_mm ?? 0),
+  }
+}
+
+function sameLabelSize(first: RenderTarget | null, second: RenderTarget | null) {
+  return Boolean(first && second && Math.abs(first.width_mm - second.width_mm) < .01 && Math.abs(first.height_mm - second.height_mm) < .01 && first.dpi === second.dpi)
+}
+
+function formatSize(target: RenderTarget | null) {
+  return target ? `${target.width_mm} × ${target.height_mm} mm · ${target.dpi} dpi` : 'Size unavailable'
+}
+
+function printerOptionLabel(printer: Record<string, any>) {
+  const target = printerRenderTarget(printer)
+  const virtual = printer.media?.loaded?.type === 'virtual' || String(printer.id) === 'virtual-zebra'
+  return `${printer.name ?? printer.id}${virtual ? ' · Virtual' : ''}${target ? ` · ${target.width_mm} × ${target.height_mm} mm` : ''}`
+}
+
+function CompactNumberInput({ label, value, integer = false, onChange }: { label: string; value: number; integer?: boolean; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => setDraft(String(value)), [value])
+  const number = Number(draft)
+  const valid = draft.trim() !== '' && Number.isFinite(number) && number > 0 && (!integer || Number.isInteger(number))
+  return <label><span>{label}</span><input
+    type='number'
+    inputMode={integer ? 'numeric' : 'decimal'}
+    min='1'
+    step={integer ? '1' : '0.1'}
+    value={draft}
+    aria-invalid={!valid}
+    onChange={(event) => {
+      setDraft(event.target.value)
+      const next = event.target.valueAsNumber
+      if (Number.isFinite(next) && next > 0 && (!integer || Number.isInteger(next))) onChange(next)
+    }}
+    onBlur={() => setDraft(String(value))}
+  /></label>
+}
+
+function OutputSizePicker({ mode, onMode, templateTarget, printerTarget, printerName, customTarget, onCustomTarget }: {
+  mode: OutputSizeMode
+  onMode: (mode: OutputSizeMode) => void
+  templateTarget: RenderTarget
+  printerTarget: RenderTarget | null
+  printerName: string
+  customTarget: RenderTarget
+  onCustomTarget: (target: RenderTarget) => void
+}) {
+  const matches = sameLabelSize(templateTarget, printerTarget)
+  const selectedTarget = mode === 'template' ? templateTarget : mode === 'printer' ? printerTarget : customTarget
+  const description = mode === 'template'
+    ? 'Original template layout.'
+    : mode === 'printer'
+      ? matches ? 'Matches the template and loaded label.' : `Matches the label loaded in ${printerName}; layout may reflow.`
+      : 'Your own dimensions for preview and printing.'
+  const customPreset = labelSizePresets.find((preset) => Math.abs(preset.width_mm - customTarget.width_mm) < .01 && Math.abs(preset.height_mm - customTarget.height_mm) < .01)
+  return <fieldset className='output-size-picker'>
+    <legend>Output label size</legend>
+    <label className='output-size-select'><span>Use for preview and print</span><select value={mode} onChange={(event) => onMode(event.target.value as OutputSizeMode)}>
+      <option value='printer' disabled={!printerTarget}>Loaded in printer{printerTarget ? ` — ${printerTarget.width_mm} × ${printerTarget.height_mm} mm` : ' — unavailable'}</option>
+      <option value='template'>Template original — {templateTarget.width_mm} × {templateTarget.height_mm} mm</option>
+      <option value='custom'>Custom size</option>
+    </select></label>
+    <div className='output-size-summary'><strong>{formatSize(selectedTarget)}</strong><span>{description}</span></div>
+    {mode === 'custom' && <div className='custom-size-editor'>
+      <label className='custom-size-preset'><span>Preset</span><select value={customPreset?.id ?? ''} onChange={(event) => {
+        const preset = labelSizePresets.find((entry) => entry.id === event.target.value)
+        if (preset) onCustomTarget({ ...customTarget, width_mm: preset.width_mm, height_mm: preset.height_mm })
+      }}><option value=''>Custom dimensions</option>{labelSizePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.width_mm} × {preset.height_mm} mm</option>)}</select></label>
+      <div className='custom-size-numbers'>
+        <CompactNumberInput label='Width mm' value={customTarget.width_mm} onChange={(width_mm) => onCustomTarget({ ...customTarget, width_mm })} />
+        <CompactNumberInput label='Height mm' value={customTarget.height_mm} onChange={(height_mm) => onCustomTarget({ ...customTarget, height_mm })} />
+        <CompactNumberInput label='DPI' value={customTarget.dpi} integer onChange={(dpi) => onCustomTarget({ ...customTarget, dpi })} />
+      </div>
+    </div>}
+    {!matches && printerTarget && mode === 'template' && <div className='size-warning' role='status'><strong>The loaded label is a different size.</strong><span>The template remains {templateTarget.width_mm} × {templateTarget.height_mm} mm and may be clipped on {printerName}. Choose “Loaded in printer” to adapt it.</span></div>}
+  </fieldset>
 }
 
 function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
@@ -163,6 +241,9 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
   const [templateId, setTemplateId] = useState(() => sessionStorage.getItem('printhub:selectedTemplate') ?? '')
   const [template, setTemplate] = useState<TemplateDetailResponse | null>(null)
   const [printerId, setPrinterId] = useState(() => localStorage.getItem('printhub:printer') ?? '')
+  const [sizeMode, setSizeMode] = useState<OutputSizeMode>('printer')
+  const firstPreset = labelSizePresets[0] ?? { width_mm: 50, height_mm: 25 }
+  const [customTarget, setCustomTarget] = useState<RenderTarget>({ width_mm: firstPreset.width_mm, height_mm: firstPreset.height_mm, dpi: 203, origin_x_mm: 0, origin_y_mm: 0 })
   const [values, setValues] = useState<Record<string, string>>({}); const [previewUrl, setPreviewUrl] = useState<string | null>(null); const [busy, setBusy] = useState<'preview' | 'print' | null>(null); const [printWarnings, setPrintWarnings] = useState<string[]>([])
   const draftId = new URLSearchParams(window.location.search).get('draft_id')
   useEffect(() => {
@@ -179,21 +260,26 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
     getBackendSdk().drafts.get(draftId).then((draft) => { setTemplate({ id: `draft:${draftId}`, name: 'Print draft', template: draft.template, variables: Object.keys(draft.variables ?? {}).map((name) => ({ name, mode: 'required' })), sample_data: draft.variables, preview_target: draft.target, preview_available: false, tags: [] } as any); setValues(Object.fromEntries(Object.entries(draft.variables ?? {}).map(([key, value]) => [key, String(value ?? '')]))) }).catch((reason) => onNotice({ tone: 'error', text: errorText(reason) }))
   }, [draftId, onNotice])
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
-  useEffect(() => { setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return null }); setPrintWarnings([]) }, [printerId, templateId])
+  useEffect(() => { setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return null }); setPrintWarnings([]) }, [customTarget.height_mm, customTarget.width_mm, printerId, sizeMode, templateId])
   const selectedPrinter = printerData.printers.find((printer) => String(printer.id) === printerId)
-  const renderTarget = template ? printerRenderTarget(selectedPrinter, template.preview_target as Record<string, any>) : null
+  const intendedTarget = template ? templateRenderTarget(template.preview_target as Record<string, any>) : null
+  const loadedTarget = printerRenderTarget(selectedPrinter)
+  useEffect(() => {
+    if (!printerData.loading && template && sizeMode === 'printer' && selectedPrinter && !loadedTarget) setSizeMode('template')
+  }, [loadedTarget, printerData.loading, selectedPrinter, sizeMode, template])
+  const renderTarget = intendedTarget ? sizeMode === 'template' ? intendedTarget : sizeMode === 'printer' ? loadedTarget : customTarget : null
   const renderBody = () => template && renderTarget ? { template: template.template, variables: values, target: renderTarget as any, debug: false } : null
   const preview = async () => { const body = renderBody(); if (!body) return; setBusy('preview'); try { const rendered = await getBackendSdk().renders.renderPngDetailed(body); const next = URL.createObjectURL(rendered.blob); setPrintWarnings(rendered.diagnostics.map((item) => item.message)); setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return next }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
-  const print = async () => { if (!template || !printerId) return; setBusy('print'); try { const body = renderBody(); if (!body) return; const preflight = await getBackendSdk().renders.renderZpl(body); const warnings = (preflight.diagnostics ?? []).map((item) => item.message); setPrintWarnings(warnings); if (warnings.length && !window.confirm(`This label has ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return; let result: any; if (!draftId && templateId) { result = await getBackendSdk().printJobs.create({ printer_id: printerId, template_id: templateId, variables: values, origin: 'printhub-studio' }) } else { result = await getBackendSdk().printers.printTemplate(printerId, { template: template.template, variables: values, debug: false, return_preview: false }) } localStorage.setItem('printhub:printer', printerId); onNotice(result.status === 'failed' ? { tone: 'error', text: result.error ?? 'Print failed.' } : { tone: 'success', text: result.id ? `Print job ${result.id} ${result.status}.` : result.job_id ? `Print job ${result.job_id} queued.` : `Label sent to ${printerId}.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
+  const print = async () => { if (!template || !printerId) return; setBusy('print'); try { const body = renderBody(); if (!body) return; const preflight = await getBackendSdk().renders.renderZpl(body); const warnings = (preflight.diagnostics ?? []).map((item) => item.message); setPrintWarnings(warnings); if (warnings.length && !window.confirm(`This label has ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return; let result: any; if (!draftId && templateId) { result = await getBackendSdk().printJobs.create({ printer_id: printerId, template_id: templateId, variables: values, target: renderTarget as any, origin: 'printhub-studio' }) } else { result = await getBackendSdk().printers.printTemplate(printerId, { template: template.template, variables: values, target: renderTarget as any, debug: false, return_preview: false }) } localStorage.setItem('printhub:printer', printerId); onNotice(result.status === 'failed' ? { tone: 'error', text: result.error ?? 'Print failed.' } : { tone: 'success', text: result.id ? `Print job ${result.id} ${result.status}.` : result.job_id ? `Print job ${result.job_id} queued.` : `Label sent to ${printerId}.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
   return <main className='page-shell quick-print-page'><header className='page-heading compact'><div><span className='eyebrow'>Quick print</span><h1>Choose, fill, print</h1><p>This view is designed for phones, scanners and quick repeat jobs.</p></div></header><div className='quick-print-layout'><section className='form-panel'>
     {!draftId && <label className='field'><span>Template</span><select value={templateId} onChange={(event) => { setTemplateId(event.target.value); sessionStorage.setItem('printhub:selectedTemplate', event.target.value) }}><option value=''>Choose a template…</option>{templates.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
-    {template && renderTarget && <div className='selected-template'><strong>{template.name}</strong><span>{String(renderTarget.width_mm)} × {String(renderTarget.height_mm)} mm · printer media</span></div>}
+    {template && intendedTarget && <div className='selected-template'><strong>{template.name}</strong><span>Designed for {formatSize(intendedTarget)}</span></div>}
     <div className='variable-form'>{(template?.variables ?? []).filter((entry: any) => !String(entry.name ?? '').startsWith('_')).map((entry: any) => <FieldInput key={String(entry.name)} definition={entry} value={values[String(entry.name)] ?? ''} onChange={(value) => setValues((current) => ({ ...current, [String(entry.name)]: value }))} />)}</div>
-    <label className='field'><span>Printer</span><select value={printerId} onChange={(event) => setPrinterId(event.target.value)}><option value=''>Choose a printer…</option>{printerData.printers.filter((printer) => printer.enabled !== false).map((printer) => <option key={printer.id} value={printer.id}>{printer.name ?? printer.id}</option>)}</select></label>
-    {selectedPrinter?.connection?.protocol === 'zebra_tamer' && template && !renderTarget && <p role='status'>Loaded media or resolution is unavailable. Configure the roll in ZebraTamer and refresh the printers before printing.</p>}
+    <label className='field'><span>Printer</span><select value={printerId} onChange={(event) => { const nextId = event.target.value; const nextPrinter = printerData.printers.find((printer) => String(printer.id) === nextId); setPrinterId(nextId); setSizeMode(printerRenderTarget(nextPrinter) ? 'printer' : 'template') }}><option value=''>Choose a printer…</option>{printerData.printers.filter((printer) => printer.enabled !== false).map((printer) => <option key={printer.id} value={printer.id}>{printerOptionLabel(printer)}</option>)}</select><small className='field-help'>{selectedPrinter ? `Printer ID: ${selectedPrinter.id}` : 'Select where the finished label should be sent.'}</small></label>
+    {template && intendedTarget && <OutputSizePicker mode={sizeMode} onMode={setSizeMode} templateTarget={intendedTarget} printerTarget={loadedTarget} printerName={String(selectedPrinter?.name ?? selectedPrinter?.id ?? 'the selected printer')} customTarget={customTarget} onCustomTarget={setCustomTarget} />}
     {printWarnings.length > 0 && <div className='builder-warning' role='status'><strong>Text layout warnings</strong><ul className='list-disc pl-5'>{printWarnings.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul></div>}
     <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!template || !renderTarget || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!template || !renderTarget || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
-  </section><section className='print-preview' aria-label='Label preview'>{previewUrl ? <img src={previewUrl} alt='Rendered label preview' /> : <div className='preview-placeholder'>{template && renderTarget ? `Tap Preview to render for ${renderTarget.width_mm} × ${renderTarget.height_mm} mm` : 'Select a template'}</div>}</section></div></main>
+  </section><section className='print-preview' aria-label='Label preview'>{previewUrl ? <><div className='preview-size-badge'>{formatSize(renderTarget)}</div><img src={previewUrl} alt='Rendered label preview' /></> : <div className='preview-placeholder'>{template && renderTarget ? `Preview will use ${formatSize(renderTarget)}` : 'Select a template'}</div>}</section></div></main>
 }
 
 function Designer() {

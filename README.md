@@ -108,6 +108,11 @@ Die Layout-Berechnung fuer Canvas/Preview laeuft ueber `computeLayout(...)` in `
 
 UI: `VariablesPanel` zeigt required variables + Makros; Werte werden im localStorage gehalten.
 
+Form definitions in stored template metadata may use `type: "textarea"` (or the
+legacy alias `multiline`) plus an optional `rows` value. This is presentation
+metadata only: the variable sent to PrintHub remains a normal string whose line
+breaks are preserved by the renderer.
+
 ## Backend-Integration (API Contracts)
 
 Konfiguration in `src/api/config.ts`:
