@@ -441,9 +441,15 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .job-row > div:first-child { min-width: 0; align-items: flex-start; flex-direction: column; gap: 2px; }
 .job-row span, .job-row small { color: var(--text-muted); }
 .job-row small { color: var(--danger); }
+.job-row-held { display: grid; grid-template-columns: 132px minmax(0,1fr) auto; align-items: stretch; border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.job-preview { width: 132px; height: 104px; object-fit: contain; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 50% / 12px 12px; image-rendering: pixelated; }
+.job-details { justify-content: center; }
+.job-actions { justify-content: flex-end; flex-wrap: wrap; }
+.job-warning { max-width: 560px; color: var(--warn) !important; line-height: 1.45; }
 .job-state { padding: 5px 9px; border-radius: 999px; background: var(--soft-bg); font-weight: 700; text-transform: capitalize; }
 .state-failed { color: var(--danger) !important; }
 .state-sent, .state-queued { color: var(--success) !important; }
+.state-held { color: var(--warn) !important; }
 .printer-card { padding: 19px; }
 .printer-card h2 { margin: 10px 0 4px; }
 .printer-card > p { min-height: 34px; margin: 0 0 17px; color: var(--text-muted); font-size: 12px; word-break: break-all; }
@@ -488,4 +494,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .quick-actions { grid-template-columns: 1fr; }
   .print-preview { min-height: 210px; padding: 44px 18px 18px; }
   .agent-row { display: grid; }
+  .job-row-held { grid-template-columns: 1fr; }
+  .job-preview { width: 100%; height: 180px; }
+  .job-actions { justify-content: flex-start; }
 }

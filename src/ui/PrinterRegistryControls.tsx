@@ -81,10 +81,11 @@ export function PrinterDiscoveryControls({ onChanged, onNotice }: Props) {
 
 export function PrinterSettingsEditor({ printer, onChanged, onNotice, onClose }: Props & { printer: Record<string, any>; onClose: () => void }) {
   const [busy, setBusy] = useState(false)
+  const zplDriver = printer.driver === 'zpl' || Boolean(printer.zpl)
   const [fields, setFields] = useState<Record<string, string | boolean>>({ name: printer.name, enabled: printer.enabled,
     width: String(printer.media.loaded.width_mm), height: String(printer.media.loaded.height_mm), dpi: String(printer.alignment.dpi),
     offsetX: String(printer.alignment.offset_x_mm), offsetY: String(printer.alignment.offset_y_mm),
-    darkness: String(printer.zpl.darkness), speed: String(printer.zpl.print_speed), copies: String(printer.defaults.copies), rotation: String(printer.defaults.rotation) })
+    darkness: String(printer.zpl?.darkness ?? ''), speed: String(printer.zpl?.print_speed ?? ''), copies: String(printer.defaults.copies), rotation: String(printer.defaults.rotation) })
   const dynamic = Boolean(printer.media.dynamic_source)
   const agentManaged = printer.connection?.protocol === 'zebra_tamer'
   const save = async () => {
@@ -100,7 +101,8 @@ export function PrinterSettingsEditor({ printer, onChanged, onNotice, onClose }:
       <h2>Edit {printer.name}</h2><p>Device identity and connection are managed separately. Saving never reassigns this printer.</p>
       {dynamic && <p>Label size and DPI come from the emulator. Change them in the emulator settings.</p>}
       {agentManaged && <p>Loaded media, color, alignment and device settings are managed by ZebraTamer. <a href={`${printer.connection.base_url}/ui/?printer=${encodeURIComponent(printer.connection.printer_id)}`} target='_blank' rel='noreferrer'>Open ZebraTamer settings</a> (requires its optional WebUI).</p>}
-      <div className='registry-fields'>{[['name', 'Name'], ['width', 'Label width (mm)'], ['height', 'Label height (mm)'], ['dpi', 'Resolution (dpi)'], ['offsetX', 'X offset (mm)'], ['offsetY', 'Y offset (mm)'], ['darkness', 'Darkness'], ['speed', 'Print speed'], ['copies', 'Copies'], ['rotation', 'Rotation (0, 90, 180, 270)']].filter(([key]) => !agentManaged || ['name', 'copies', 'rotation'].includes(key)).map(([key, label]) =>
+      {!zplDriver && <p>Driver-specific settings are owned by the {printer.driver} adapter and are not interpreted by PrintHub Studio.</p>}
+      <div className='registry-fields'>{[['name', 'Name'], ['width', 'Label width (mm)'], ['height', 'Label height (mm)'], ['dpi', 'Resolution (dpi)'], ['offsetX', 'X offset (mm)'], ['offsetY', 'Y offset (mm)'], ['darkness', 'Darkness'], ['speed', 'Print speed'], ['copies', 'Copies'], ['rotation', 'Rotation (0, 90, 180, 270)']].filter(([key]) => (!agentManaged || ['name', 'copies', 'rotation'].includes(key)) && (zplDriver || !['darkness', 'speed'].includes(key))).map(([key, label]) =>
         <label className='field' key={key}><span>{label}</span><input required disabled={dynamic && ['width', 'height', 'dpi'].includes(key)} type={key === 'name' ? 'text' : 'number'} step='any' value={String(fields[key])} onChange={(event) => setFields({ ...fields, [key]: event.target.value })} /></label>)}</div>
       <label className='registry-enabled'><input type='checkbox' checked={Boolean(fields.enabled)} onChange={(event) => setFields({ ...fields, enabled: event.target.checked })} /> Enabled for printing</label>
       <div className='registry-actions'><button type='submit' disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button><button type='button' disabled={busy} onClick={onClose}>Cancel</button></div>

@@ -1,4 +1,4 @@
-import type { TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
+import type { PrintJobResponse, TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
 import { useCallback, useEffect, useState } from 'react'
 import { backendBase, labelSizePresets } from '../api/config'
 import { getBackendSdk } from '../api/sdk'
@@ -19,7 +19,7 @@ import ToolbarPopover from '../ui/ToolbarPopover'
 
 type View = 'templates' | 'print' | 'designer' | 'printers'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
-type PrintJob = { id: string; status: string; printer_id: string; template_id: string; attempts: number; error?: string | null; created_at: string }
+type PrintJob = PrintJobResponse
 type RenderTarget = { width_mm: number; height_mm: number; dpi: number; origin_x_mm: number; origin_y_mm: number }
 type OutputSizeMode = 'template' | 'printer' | 'custom'
 
@@ -324,6 +324,23 @@ function Designer() {
     <div className='designer-workspace'><aside><TreePanel /></aside><section className={`canvas-stack${resizingCanvas ? ' resizing' : ''}`} style={{ gridTemplateRows: `minmax(160px, ${canvasSplit}fr) 12px minmax(160px, ${1 - canvasSplit}fr)` }}><div className='canvas-surface'><CanvasEditor /></div><div className='canvas-resizer' role='separator' aria-label='Resize label editor and preview' aria-orientation='horizontal' aria-valuemin={25} aria-valuemax={75} aria-valuenow={Math.round(canvasSplit * 100)} tabIndex={0} onDoubleClick={() => setCanvasSplit(0.5)} onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); setResizingCanvas(true) }} onPointerMove={(event) => { if (!resizingCanvas) return; const bounds = event.currentTarget.parentElement?.getBoundingClientRect(); if (!bounds) return; setCanvasSplit(Math.min(0.75, Math.max(0.25, (event.clientY - bounds.top) / bounds.height))) }} onPointerUp={(event) => { setResizingCanvas(false); event.currentTarget.releasePointerCapture(event.pointerId) }} onLostPointerCapture={() => setResizingCanvas(false)} onKeyDown={(event) => { if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown' && event.key !== 'Home') return; event.preventDefault(); setCanvasSplit((current) => event.key === 'Home' ? 0.5 : Math.min(0.75, Math.max(0.25, current + (event.key === 'ArrowDown' ? 0.05 : -0.05)))) }} title='Drag to resize. Double-click to reset.'><span /></div><div className='render-surface'><LabelPreviewPanel /></div></section><aside className='properties-surface'><PropertiesPanel /></aside></div><footer className='designer-status'><ValidationPanel issues={issues} /></footer>{storeOpen && <TemplateStoreDialog onClose={() => setStoreOpen(false)} />}{jsonMode && <JsonDialog mode={jsonMode} onClose={() => setJsonMode(null)} />}</main>
 }
 
+function PrintJobRow({ job, onRetry, onRelease }: {
+  job: PrintJob
+  onRetry: (jobId: string) => void
+  onRelease: (jobId: string, scaling: 'fit' | 'fill') => void
+}) {
+  const title = job.template_id ?? (job.source_kind === 'raster' ? 'IPP document' : 'Print job')
+  const preview = job.preview_png_base64 ? `data:image/png;base64,${job.preview_png_base64}` : null
+  return <article className={`job-row${job.status === 'held' ? ' job-row-held' : ''}`}>
+    {job.status === 'held' && preview && <img className='job-preview' src={preview} alt='Monochrome fit preview' />}
+    <div className='job-details'><strong>{title}</strong><span>{job.printer_id} · {job.page_count ?? 1} page{job.page_count === 1 ? '' : 's'} · attempt {job.attempts}</span>{job.warning && <small className='job-warning'>{job.warning}</small>}{job.error && <small>{job.error}</small>}</div>
+    <div className='job-actions'><span className={`job-state state-${job.status}`}>{job.status.replace('_', ' ')}</span>
+      {job.status === 'held' && <><button type='button' className='primary-action' onClick={() => onRelease(job.id, 'fit')}>Fit & print</button><button type='button' onClick={() => onRelease(job.id, 'fill')}>Fill & crop</button></>}
+      {(job.status === 'failed' || job.status === 'outcome_unknown') && <button type='button' onClick={() => onRetry(job.id)}>Retry</button>}
+    </div>
+  </article>
+}
+
 function Printers({ onNotice }: { onNotice: (notice: Notice) => void }) {
   const printerData = usePrinters(); const [editingPrinter, setEditingPrinter] = useState<Record<string, any> | null>(null); const [status, setStatus] = useState<Record<string, any>>({}); const [jobs, setJobs] = useState<PrintJob[]>([])
   const [refreshing, setRefreshing] = useState<Record<string, boolean>>({})
@@ -343,6 +360,7 @@ function Printers({ onNotice }: { onNotice: (notice: Notice) => void }) {
     } finally { setRefreshing((current) => ({ ...current, [printerId]: false })) }
   }
   const retry = async (jobId: string) => { try { await getBackendSdk().printJobs.retry(jobId); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} retried.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
+  const release = async (jobId: string, scaling: 'fit' | 'fill') => { try { await getBackendSdk().printJobs.release(jobId, { scaling }); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} released with ${scaling} scaling.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
   return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>Printer fleet</span><h1>One place for every label printer</h1><p>One persistent inventory. Discover printers, preserve their settings, and keep offline devices registered.</p></div></header>
     <PrinterDiscoveryControls onChanged={printerData.refresh} onNotice={onNotice} />
     {editingPrinter && <PrinterSettingsEditor key={editingPrinter.id} printer={editingPrinter} onChanged={printerData.refresh} onNotice={onNotice} onClose={() => setEditingPrinter(null)} />}
@@ -363,7 +381,7 @@ function Printers({ onNotice }: { onNotice: (notice: Notice) => void }) {
         <button type='button' onClick={() => void editPrinter(String(printer.id))}>Edit settings</button>
       </article>
     })}</div>
-    <section className='jobs-panel'><div className='section-heading'><div><h2>Recent print jobs</h2><p>Failed jobs remain visible and can be retried safely.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></div>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <article className='job-row' key={job.id}><div><strong>{job.template_id}</strong><span>{job.printer_id} · attempt {job.attempts}</span>{job.error && <small>{job.error}</small>}</div><div><span className={`job-state state-${job.status}`}>{job.status.replace('_', ' ')}</span>{(job.status === 'failed' || job.status === 'outcome_unknown') && <button type='button' onClick={() => void retry(job.id)}>Retry</button>}</div></article>)}</div>}</section></main>
+    <section className='jobs-panel'><div className='section-heading'><div><h2>Recent print jobs</h2><p>Size mismatches wait here with the exact monochrome fit preview. Fill & crop can remove edge content. Failed jobs remain retryable.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></div>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <PrintJobRow key={job.id} job={job} onRetry={(id) => void retry(id)} onRelease={(id, scaling) => void release(id, scaling)} />)}</div>}</section></main>
 }
 
 export default function StudioApp() {

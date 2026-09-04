@@ -36,3 +36,17 @@ test('ZebraTamer settings never write duplicate media or device defaults', () =>
   const body = settingsPayload(agent, fields)
   assert.deepEqual(body.settings, { name: 'Edited', enabled: false, defaults: { copies: 2, rotation: 90 } })
 })
+
+test('non-ZPL driver settings never invent ZPL configuration', () => {
+  const niimbot = {
+    ...printer,
+    driver: 'niimbot_b1',
+    zpl: undefined,
+    driver_options: { compression: 'auto' },
+    media: { loaded: printer.media.loaded },
+  }
+  const body = settingsPayload(niimbot, fields)
+  assert.equal('zpl' in body.settings, false)
+  assert.equal(body.settings.alignment.dpi, 300)
+  assert.equal(body.settings.media.loaded.width_mm, 60)
+})

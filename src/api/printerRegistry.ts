@@ -34,9 +34,9 @@ export function settingsPayload(printer: Record<string, any>, fields: Record<str
     name: String(fields.name).trim(), enabled: Boolean(fields.enabled),
     alignment: { ...printer.alignment, offset_x_mm: numeric('offsetX'), offset_y_mm: numeric('offsetY'),
       dpi: dynamic ? printer.alignment.dpi : numeric('dpi') },
-    zpl: { ...printer.zpl, darkness: numeric('darkness'), print_speed: numeric('speed') },
     defaults: { ...printer.defaults, copies: numeric('copies'), rotation: numeric('rotation') },
   }
+  if (printer.driver === 'zpl' || printer.zpl) settings.zpl = { ...printer.zpl, darkness: numeric('darkness'), print_speed: numeric('speed') }
   if (!dynamic) settings.media = { ...printer.media, loaded: { ...printer.media.loaded, width_mm: numeric('width'), height_mm: numeric('height') } }
   return { revision: printer.registry.revision, settings }
 }
