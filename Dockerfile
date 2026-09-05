@@ -11,7 +11,8 @@ COPY LabelArchitect ./
 RUN npm run build
 
 FROM nginx:stable-alpine@sha256:97d490c12ba55b4946b01546d1c3ed324e8d41ab1c9fcb2a616aa470620e5b46 AS runtime
-RUN apk add --no-cache --upgrade gettext libssl3 libcrypto3 \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache gettext \
     && sed -i 's@/var/run/nginx.pid@/tmp/nginx.pid@; s@/run/nginx.pid@/tmp/nginx.pid@; /^user /d' /etc/nginx/nginx.conf \
     && chown -R nginx:nginx /etc/nginx/conf.d /var/cache/nginx /usr/share/nginx/html
 COPY --from=build --chown=nginx:nginx /workspace/LabelArchitect/dist /usr/share/nginx/html
