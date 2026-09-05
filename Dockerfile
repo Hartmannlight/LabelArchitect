@@ -13,10 +13,10 @@ RUN npm run build
 FROM nginx:stable-alpine-slim@sha256:77da26c31397bf6694b4bf93275f5b40b0b120ba1b8f114264b603e592c561d6 AS runtime
 RUN apk upgrade --no-cache \
     && apk add --no-cache gettext \
-    && sed -i 's@/var/run/nginx.pid@/tmp/nginx.pid@; s@/run/nginx.pid@/tmp/nginx.pid@; /^user /d' /etc/nginx/nginx.conf \
     && mkdir -p /etc/nginx/http.d /opt/labelarchitect /var/cache/nginx /usr/share/nginx/html \
     && chown -R nginx:nginx /etc/nginx/http.d /opt/labelarchitect /var/cache/nginx /usr/share/nginx/html
 COPY --from=build --chown=nginx:nginx /workspace/LabelArchitect/dist /usr/share/nginx/html
+COPY --from=build /workspace/LabelArchitect/nginx.runtime.conf /etc/nginx/nginx.conf
 COPY --from=build /workspace/LabelArchitect/nginx.conf.template /opt/labelarchitect/nginx.conf.template
 COPY --from=build --chown=nginx:nginx /workspace/LabelArchitect/public/config.template.js /usr/share/nginx/html/config.template.js
 COPY --from=build /workspace/LabelArchitect/docker-entrypoint.d/99-runtime-config.sh /docker-entrypoint.d/99-runtime-config.sh
