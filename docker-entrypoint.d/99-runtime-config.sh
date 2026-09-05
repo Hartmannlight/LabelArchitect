@@ -3,8 +3,8 @@ set -eu
 
 TEMPLATE_PATH=/usr/share/nginx/html/config.template.js
 OUTPUT_PATH=/usr/share/nginx/html/config.js
-NGINX_TEMPLATE_PATH=/etc/nginx/templates/default.conf.template
-NGINX_OUTPUT_PATH=/etc/nginx/conf.d/default.conf
+NGINX_TEMPLATE_PATH=/opt/labelarchitect/nginx.conf.template
+NGINX_OUTPUT_PATH=/etc/nginx/http.d/default.conf
 
 if [ -z "${APP_BACKEND_API_BASE:-}" ] && [ -n "${VITE_BACKEND_API_BASE:-}" ]; then
   APP_BACKEND_API_BASE="$VITE_BACKEND_API_BASE"
