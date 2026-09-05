@@ -2,6 +2,7 @@ type RuntimeConfig = {
   backendBase?: string
   renderBase?: string
   operatorBase?: string
+  fleetConsoleBase?: string
   labelSizePresets?: string
 }
 
@@ -10,11 +11,14 @@ const runtimeConfig = (globalThis as { __APP_CONFIG__?: RuntimeConfig }).__APP_C
 const envBackendBase = import.meta.env.VITE_BACKEND_API_BASE as string | undefined
 const envRenderBase = import.meta.env.VITE_RENDER_API_BASE as string | undefined
 const envOperatorBase = import.meta.env.VITE_OPERATOR_APP_BASE as string | undefined
+const envFleetConsoleBase = import.meta.env.VITE_FLEET_CONSOLE_BASE as string | undefined
 
 export const backendBase = runtimeConfig?.backendBase ?? envBackendBase ?? ''
 export const renderBase = runtimeConfig?.renderBase ?? envRenderBase ?? backendBase
 export const operatorBase =
   runtimeConfig?.operatorBase ?? envOperatorBase ?? 'http://localhost:5174'
+export const fleetConsoleBase =
+  runtimeConfig?.fleetConsoleBase ?? envFleetConsoleBase ?? 'http://localhost:8089'
 
 const defaultLabelSizes = '50x25,40x30,20x10,50x50,50x30,30x20,72x26,74x26,100x50,100x150'
 

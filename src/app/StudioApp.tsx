@@ -1,11 +1,8 @@
 import type { PrintJobResponse, TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
 import { useCallback, useEffect, useState } from 'react'
-import { backendBase, labelSizePresets } from '../api/config'
+import { fleetConsoleBase, labelSizePresets } from '../api/config'
 import { getBackendSdk } from '../api/sdk'
 import { errorText } from '../api/errorText'
-import { refreshPrinter, supportsLiveStatus } from '../api/printerRefresh'
-import { registryRequest } from '../api/printerRegistry'
-import { PrinterDiscoveryControls, PrinterSettingsEditor } from '../ui/PrinterRegistryControls'
 import { useTemplateEditorStore } from '../state/store'
 import CanvasEditor from '../ui/CanvasEditor'
 import JsonDialog from '../ui/JsonDialog'
@@ -17,7 +14,7 @@ import TreePanel from '../ui/TreePanel'
 import ValidationPanel from '../ui/ValidationPanel'
 import ToolbarPopover from '../ui/ToolbarPopover'
 
-type View = 'templates' | 'print' | 'designer' | 'printers'
+type View = 'templates' | 'print' | 'designer' | 'jobs'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
 type PrintJob = PrintJobResponse
 type RenderTarget = { width_mm: number; height_mm: number; dpi: number; origin_x_mm: number; origin_y_mm: number }
@@ -26,7 +23,8 @@ type OutputSizeMode = 'template' | 'printer' | 'custom'
 const currentView = (): View => {
   if (new URLSearchParams(window.location.search).get('draft_id')) return 'print'
   const value = window.location.hash.replace('#/', '')
-  return value === 'print' || value === 'designer' || value === 'printers' ? value : 'templates'
+  if (value === 'printers') return 'jobs'
+  return value === 'print' || value === 'designer' || value === 'jobs' ? value : 'templates'
 }
 
 const navigate = (view: View) => {
@@ -46,7 +44,7 @@ function AppNav({ view }: { view: View }) {
     ['templates', 'Templates', 'Ready to fill and print'],
     ['print', 'Quick print', 'Fill and send a label'],
     ['designer', 'Designer', 'Desktop label editor'],
-    ['printers', 'Printers', 'ZebraTamer and direct printers']
+    ['jobs', 'Print jobs', 'Held, failed and recent jobs']
   ]
   return <nav className='studio-nav' aria-label='PrintHub Studio'>{entries.map(([key, title, subtitle]) => <button key={key} type='button' className={view === key ? 'active' : ''} onClick={() => navigate(key)}><span>{title}</span><small>{subtitle}</small></button>)}</nav>
 }
@@ -82,8 +80,7 @@ function usePrinters() {
     finally { setLoading(false) }
   }
   useEffect(() => void refresh(), [])
-  const updatePrinter = (printer: Record<string, any>) => setPrinters((current) => current.map((entry) => entry.id === printer.id ? printer : entry))
-  return { printers, defaultPrinterId, loading, error, refresh, updatePrinter }
+  return { printers, defaultPrinterId, loading, error }
 }
 
 function printerRenderTarget(printer: Record<string, any> | undefined): RenderTarget | null {
@@ -341,47 +338,14 @@ function PrintJobRow({ job, onRetry, onRelease }: {
   </article>
 }
 
-function Printers({ onNotice }: { onNotice: (notice: Notice) => void }) {
-  const printerData = usePrinters(); const [editingPrinter, setEditingPrinter] = useState<Record<string, any> | null>(null); const [status, setStatus] = useState<Record<string, any>>({}); const [jobs, setJobs] = useState<PrintJob[]>([])
-  const [refreshing, setRefreshing] = useState<Record<string, boolean>>({})
+function PrintJobs({ onNotice }: { onNotice: (notice: Notice) => void }) {
+  const [jobs, setJobs] = useState<PrintJob[]>([])
   const refreshJobs = useCallback(async () => { try { setJobs(await getBackendSdk().printJobs.list(20)) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }, [onNotice])
   useEffect(() => { void refreshJobs() }, [refreshJobs])
-  const editPrinter = async (id: string) => { try { setEditingPrinter(await registryRequest(backendBase, `/v1/printers/${encodeURIComponent(id)}/configuration`, undefined, 'GET')) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
-  const refreshStatus = async (printerId: string) => {
-    setRefreshing((current) => ({ ...current, [printerId]: true }))
-    try {
-      const result = await refreshPrinter(printerId, getBackendSdk().printers)
-      printerData.updatePrinter(result.printer)
-      setStatus((current) => ({ ...current, [printerId]: result.status }))
-      onNotice({ tone: 'success', text: result.status ? 'Printer status refreshed.' : 'Printer details and media refreshed. Live status is unavailable for this printer.' })
-    } catch (reason) {
-      setStatus((current) => ({ ...current, [printerId]: null }))
-      onNotice({ tone: 'error', text: errorText(reason) })
-    } finally { setRefreshing((current) => ({ ...current, [printerId]: false })) }
-  }
   const retry = async (jobId: string) => { try { await getBackendSdk().printJobs.retry(jobId); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} retried.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
   const release = async (jobId: string, scaling: 'fit' | 'fill') => { try { await getBackendSdk().printJobs.release(jobId, { scaling }); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} released with ${scaling} scaling.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
-  return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>Printer fleet</span><h1>One place for every label printer</h1><p>One persistent inventory. Discover printers, preserve their settings, and keep offline devices registered.</p></div></header>
-    <PrinterDiscoveryControls onChanged={printerData.refresh} onNotice={onNotice} />
-    {editingPrinter && <PrinterSettingsEditor key={editingPrinter.id} printer={editingPrinter} onChanged={printerData.refresh} onNotice={onNotice} onClose={() => setEditingPrinter(null)} />}
-    {printerData.loading && <div className='empty-state'>Loading printers…</div>}{printerData.error && <div className='empty-state error-state'>{printerData.error}</div>}
-    <div className='printer-grid'>{printerData.printers.map((printer) => {
-      const summary = status[printer.id]?.normalized?.summary
-      const liveStatus = supportsLiveStatus(printer)
-      const attention = summary?.ready === false || summary?.has_errors === true
-      const state = printer.enabled === false ? 'Disabled' : printer.discovery?.available === false ? 'Offline' : attention ? 'Attention' : summary?.ready === true ? 'Ready' : 'Configured'
-      return <article className='printer-card' key={printer.id}>
-        <div className='printer-state'><span className={`state-dot ${state === 'Attention' ? 'warning' : state === 'Ready' ? '' : 'unknown'}`} />{state}</div>
-        <h2>{printer.name ?? printer.id}</h2><p>{printer.connection?.protocol === 'zebra_tamer' ? `ZebraTamer · ${printer.connection.base_url}` : `${printer.connection?.host}:${printer.connection?.port}`}</p>
-        {printer.discovery?.available === false && <p className='printer-status-hint'>{printer.discovery.error} Saved settings are retained.</p>}
-        <dl><div><dt>Media</dt><dd>{printer.media?.loaded ? `${printer.media.loaded.width_mm} × ${printer.media.loaded.height_mm} mm · ${printer.media.loaded.color}` : 'No live media information'}</dd></div><div><dt>Resolution</dt><dd>{printer.alignment?.dpi ? `${printer.alignment.dpi} dpi` : 'Unknown'}</dd></div>{summary?.model && <div><dt>Model</dt><dd>{summary.model}</dd></div>}</dl>
-        {printer.connection?.protocol === 'zebra_tamer' && <a href={`${printer.connection.base_url}/ui/?printer=${encodeURIComponent(String(printer.connection.printer_id))}`} target='_blank' rel='noreferrer'>Manage device and loaded roll in ZebraTamer</a>}
-        {!liveStatus && <p className='printer-status-hint'>{printer.enabled === false ? 'This printer is disabled.' : 'This printer does not support live status.'} You can still refresh its details and media.</p>}
-        <button type='button' disabled={refreshing[printer.id]} onClick={() => void refreshStatus(String(printer.id))}>{refreshing[printer.id] ? 'Refreshing…' : liveStatus ? 'Refresh status' : 'Refresh details'}</button>
-        <button type='button' onClick={() => void editPrinter(String(printer.id))}>Edit settings</button>
-      </article>
-    })}</div>
-    <section className='jobs-panel'><div className='section-heading'><div><h2>Recent print jobs</h2><p>Size mismatches wait here with the exact monochrome fit preview. Fill & crop can remove edge content. Failed jobs remain retryable.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></div>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <PrintJobRow key={job.id} job={job} onRetry={(id) => void retry(id)} onRelease={(id, scaling) => void release(id, scaling)} />)}</div>}</section></main>
+  return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>PrintHub jobs</span><h1>Review recent print jobs</h1><p>Size mismatches wait here with the exact monochrome fit preview. Physical devices and queues are managed separately in Fleet Console.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></header>
+    <section className='jobs-panel'>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <PrintJobRow key={job.id} job={job} onRetry={(id) => void retry(id)} onRelease={(id, scaling) => void release(id, scaling)} />)}</div>}</section></main>
 }
 
 export default function StudioApp() {
@@ -397,5 +361,5 @@ export default function StudioApp() {
       document.body.classList.remove('designer-viewport')
     }
   }, [view])
-  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'printers' && <Printers onNotice={setNotice} />}</div></div>
+  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><a href={fleetConsoleBase} target='_blank' rel='noreferrer'>Manage printer fleet ↗</a><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'jobs' && <PrintJobs onNotice={setNotice} />}</div></div>
 }

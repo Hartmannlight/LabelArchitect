@@ -22,7 +22,7 @@ COPY --from=build --chown=nginx:nginx /workspace/LabelArchitect/public/config.te
 COPY --from=build /workspace/LabelArchitect/docker-entrypoint.d/99-runtime-config.sh /docker-entrypoint.d/99-runtime-config.sh
 RUN sed -i 's/\r$//' /docker-entrypoint.d/99-runtime-config.sh \
     && chmod +x /docker-entrypoint.d/99-runtime-config.sh
-ENV APP_BACKEND_API_BASE=/api APP_RENDER_API_BASE=/api APP_API_UPSTREAM=http://127.0.0.1:8000
+ENV APP_BACKEND_API_BASE=/api APP_RENDER_API_BASE=/api APP_FLEET_CONSOLE_BASE=http://localhost:8089 APP_API_UPSTREAM=http://127.0.0.1:8000
 USER nginx
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
