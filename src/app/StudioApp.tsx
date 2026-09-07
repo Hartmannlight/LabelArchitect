@@ -324,7 +324,7 @@ function Designer() {
 function PrintJobRow({ job, onRetry, onRelease }: {
   job: PrintJob
   onRetry: (jobId: string) => void
-  onRelease: (jobId: string, scaling: 'fit' | 'fill') => void
+  onRelease: (jobId: string, scaling: 'fit' | 'fill', overrideLabelLimit: boolean) => void
 }) {
   const title = job.template_id ?? (job.source_kind === 'raster' ? 'IPP document' : 'Print job')
   const preview = job.preview_png_base64 ? `data:image/png;base64,${job.preview_png_base64}` : null
@@ -332,7 +332,8 @@ function PrintJobRow({ job, onRetry, onRelease }: {
     {job.status === 'held' && preview && <img className='job-preview' src={preview} alt='Monochrome fit preview' />}
     <div className='job-details'><strong>{title}</strong><span>{job.printer_id} · {job.page_count ?? 1} page{job.page_count === 1 ? '' : 's'} · attempt {job.attempts}</span>{job.warning && <small className='job-warning'>{job.warning}</small>}{job.error && <small>{job.error}</small>}</div>
     <div className='job-actions'><span className={`job-state state-${job.status}`}>{job.status.replace('_', ' ')}</span>
-      {job.status === 'held' && <><button type='button' className='primary-action' onClick={() => onRelease(job.id, 'fit')}>Fit & print</button><button type='button' onClick={() => onRelease(job.id, 'fill')}>Fill & crop</button></>}
+      {job.status === 'held' && job.hold_reason === 'label_limit_exceeded' && <button type='button' className='primary-action' onClick={() => onRelease(job.id, 'fit', true)}>Print {job.requested_labels} labels anyway</button>}
+      {job.status === 'held' && job.hold_reason !== 'label_limit_exceeded' && <><button type='button' className='primary-action' onClick={() => onRelease(job.id, 'fit', false)}>Fit & print</button><button type='button' onClick={() => onRelease(job.id, 'fill', false)}>Fill & crop</button></>}
       {(job.status === 'failed' || job.status === 'outcome_unknown') && <button type='button' onClick={() => onRetry(job.id)}>Retry</button>}
     </div>
   </article>
@@ -343,9 +344,9 @@ function PrintJobs({ onNotice }: { onNotice: (notice: Notice) => void }) {
   const refreshJobs = useCallback(async () => { try { setJobs(await getBackendSdk().printJobs.list(20)) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }, [onNotice])
   useEffect(() => { void refreshJobs() }, [refreshJobs])
   const retry = async (jobId: string) => { try { await getBackendSdk().printJobs.retry(jobId); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} retried.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
-  const release = async (jobId: string, scaling: 'fit' | 'fill') => { try { await getBackendSdk().printJobs.release(jobId, { scaling }); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} released with ${scaling} scaling.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
+  const release = async (jobId: string, scaling: 'fit' | 'fill', overrideLabelLimit: boolean) => { if (overrideLabelLimit && !window.confirm('This job exceeds the configured label limit. Print it anyway?')) return; try { await getBackendSdk().printJobs.release(jobId, { scaling, override_label_limit: overrideLabelLimit }); await refreshJobs(); onNotice({ tone: 'success', text: `Print job ${jobId} released with ${scaling} scaling.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } }
   return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>PrintHub jobs</span><h1>Review recent print jobs</h1><p>Size mismatches wait here with the exact monochrome fit preview. Physical devices and queues are managed separately in Fleet Console.</p></div><button type='button' onClick={() => void refreshJobs()}>Refresh</button></header>
-    <section className='jobs-panel'>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <PrintJobRow key={job.id} job={job} onRetry={(id) => void retry(id)} onRelease={(id, scaling) => void release(id, scaling)} />)}</div>}</section></main>
+    <section className='jobs-panel'>{jobs.length === 0 ? <div className='empty-state'>No print jobs yet.</div> : <div className='job-list'>{jobs.map((job) => <PrintJobRow key={job.id} job={job} onRetry={(id) => void retry(id)} onRelease={(id, scaling, override) => void release(id, scaling, override)} />)}</div>}</section></main>
 }
 
 export default function StudioApp() {

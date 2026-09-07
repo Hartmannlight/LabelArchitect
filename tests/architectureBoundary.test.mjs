@@ -8,6 +8,9 @@ const studioSource = await readFile(new URL('../src/app/StudioApp.tsx', import.m
 test('Studio delegates physical printer administration to Fleet Console', () => {
   assert.match(studioSource, /Manage printer fleet/)
   assert.match(studioSource, /function PrintJobs/)
+  assert.match(studioSource, /hold_reason === 'label_limit_exceeded'/)
+  assert.match(studioSource, /exceeds the configured label limit/)
+  assert.match(studioSource, /override_label_limit: overrideLabelLimit/)
   assert.doesNotMatch(studioSource, /PrinterDiscoveryControls|PrinterSettingsEditor/)
   assert.doesNotMatch(studioSource, /\/configuration|\/status|\/prints\/zpl/)
 })
