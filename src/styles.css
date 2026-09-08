@@ -229,6 +229,20 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .starter-grid button small { margin-top: auto; color: var(--text-subtle); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .empty-state { padding: 44px 22px; text-align: center; border: 1px dashed var(--border-strong); border-radius: 15px; color: var(--text-muted); }
 .error-state { color: var(--danger); }
+.management-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.management-card { padding: 22px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-bg); }
+.management-card.span-two { grid-column: 1 / -1; }
+.management-card h2 { margin: 0 0 8px; font-size: 18px; }
+.management-card > p { margin: 0 0 15px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
+.inline-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; }
+.form-stack { display: grid; gap: 10px; }
+.form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; align-items: end; }
+.form-grid label { display: grid; gap: 6px; }
+.form-grid label > span { color: var(--text-muted); font-size: 11px; font-weight: 600; }
+.printer-list { display: grid; gap: 8px; }
+.printer-list > div { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.printer-list span { color: var(--text-muted); font-size: 11px; }
+@media (max-width: 800px) { .management-grid { grid-template-columns: 1fr; } .management-card.span-two { grid-column: auto; } .form-grid { grid-template-columns: 1fr; } }
 
 .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
 .template-card { overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-bg); transition: transform .18s ease, border-color .18s ease; }

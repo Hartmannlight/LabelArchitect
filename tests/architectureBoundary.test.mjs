@@ -5,16 +5,21 @@ import { URL } from 'node:url'
 
 const studioSource = await readFile(new URL('../src/app/StudioApp.tsx', import.meta.url), 'utf8')
 
-test('Studio delegates physical printer administration to Fleet Console', () => {
-  assert.match(studioSource, /Manage printer fleet/)
+test('Studio manages print services and printers through PrintHub', () => {
+  assert.match(studioSource, /function PrinterManagement/)
+  assert.match(studioSource, /\/v1\/printer-services/)
+  assert.match(studioSource, /\/v1\/ipp-shares/)
   assert.match(studioSource, /function PrintJobs/)
   assert.match(studioSource, /hold_reason === 'label_limit_exceeded'/)
   assert.match(studioSource, /exceeds the configured label limit/)
   assert.match(studioSource, /override_label_limit: overrideLabelLimit/)
-  assert.doesNotMatch(studioSource, /PrinterDiscoveryControls|PrinterSettingsEditor/)
-  assert.doesNotMatch(studioSource, /\/configuration|\/status|\/prints\/zpl/)
+  assert.match(studioSource, /output_mode: outputMode/)
+  assert.match(studioSource, /Rendered image/)
+  assert.match(studioSource, /Native ZPL/)
+  assert.doesNotMatch(studioSource, /external hardware console/i)
 })
 
-test('legacy printer navigation lands on logical print jobs', () => {
-  assert.match(studioSource, /value === 'printers'\) return 'jobs'/)
+test('printer navigation has a dedicated management view', () => {
+  assert.match(studioSource, /View = 'templates' \| 'print' \| 'designer' \| 'printers' \| 'jobs'/)
+  assert.match(studioSource, /view === 'printers'/)
 })

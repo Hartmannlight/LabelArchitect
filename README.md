@@ -7,17 +7,19 @@ LabelGallery operator workflow in one React application.
 - `/#/print`: mobile-first fill, preview and print flow
 - `/#/designer`: desktop-only visual template editor
 - `/#/jobs`: held, failed and recent logical PrintHub jobs
+- `/#/printers`: print services, printers, media and IPP shares
 
-Physical printers, transport endpoints, queues, status and maintenance are owned
-by the separately deployable PrinterFleet Console. The Studio links to that
-console but does not administer hardware.
+Studio is the common product entry point. PrintHub stores the public printer
+catalog and connects independent print services. Zebra transports and hardware
+configuration remain owned by ZebraTamer; Studio invokes those functions via
+PrintHub instead of embedding device credentials in browser JavaScript.
 
 The application is intentionally independent from Thingdex. Template variables
 form a public, typed input contract that can be completed manually, through the
 PrintHub API, or by an optional Thingdex integration.
 
 PrintHub remains responsible for templates, rendering and logical jobs.
-PrinterFleet owns hardware I/O and observed printer status.
+Each print service owns hardware I/O and observed printer status.
 
 ## Development
 
@@ -122,13 +124,11 @@ Konfiguration in `src/api/config.ts`:
 - `VITE_BACKEND_API_BASE` (Default: same origin)
 - `VITE_RENDER_API_BASE` (Default: Backend Base)
 - `VITE_OPERATOR_APP_BASE` (Default: `http://localhost:5174`)
-- `VITE_FLEET_CONSOLE_BASE` (Default: `http://localhost:8089`)
 
 Runtime-Config (Docker/Nginx):
 - `APP_BACKEND_API_BASE`
 - `APP_RENDER_API_BASE`
 - `APP_OPERATOR_APP_BASE`
-- `APP_FLEET_CONSOLE_BASE`
 
 Aktuelle Endpunkte, die das Frontend erwartet:
 
