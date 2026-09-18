@@ -10,7 +10,7 @@ RUN npm ci
 COPY LabelArchitect ./
 RUN npm run build
 
-FROM nginx:stable-alpine-slim@sha256:2853ea34f0e5448adfd4f6ec9c2a7974f28260730adc7a4be4e87600294fe5a2 AS runtime
+FROM nginx:stable-alpine-slim@sha256:0ae85631d55f78b0ad8e8468baadd7fa82c1a1285152c63055fd6333dded4e06 AS runtime
 RUN apk upgrade --no-cache \
     && apk add --no-cache gettext \
     && mkdir -p /etc/nginx/http.d /opt/labelarchitect /var/cache/nginx /usr/share/nginx/html \
