@@ -43,6 +43,23 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'manifest unknown')):
             release.absent('new')
 
+    def test_transient_registry_failures_are_retried(self):
+        failure = subprocess.CalledProcessError(1, ['docker', 'push'])
+        with patch.object(release, 'run', side_effect=[failure, failure, 'published']) as run, \
+                patch.object(release.time, 'sleep') as sleep:
+            self.assertEqual(release.retry('docker', 'push', 'image'), 'published')
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_args_list, [unittest.mock.call(5), unittest.mock.call(10)])
+
+    def test_permanent_registry_failure_is_reported(self):
+        failure = subprocess.CalledProcessError(1, ['docker', 'push'])
+        with patch.object(release, 'run', side_effect=failure) as run, \
+                patch.object(release.time, 'sleep') as sleep:
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.retry('docker', 'push', 'image')
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
     def test_dependency_branches_cannot_publish(self):
         with patch.dict(os.environ, {'GITHUB_REF': 'refs/heads/renovate/example'}):
             with self.assertRaisesRegex(RuntimeError, 'restricted'):
