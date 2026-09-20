@@ -4,10 +4,21 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 def run(*args):
     return subprocess.check_output(args, text=True).strip()
+
+def retry(*args, attempts=3):
+    for attempt in range(1, attempts + 1):
+        try:
+            return run(*args)
+        except subprocess.CalledProcessError:
+            if attempt == attempts:
+                raise
+            print(f'Registry operation failed; retrying attempt {attempt + 1}/{attempts}', file=sys.stderr)
+            time.sleep(attempt * 5)
 
 def output(key, value):
     with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
@@ -41,8 +52,8 @@ def main():
         absent(tag)
         run('docker', 'load', '-i', 'candidate/image.tar')
         run('docker', 'tag', 'candidate:gate', tag)
-        run('docker', 'push', tag)
-        digest = json.loads(run('docker', 'buildx', 'imagetools', 'inspect', tag, '--format', '{{json .Manifest}}'))['digest']
+        retry('docker', 'push', tag)
+        digest = json.loads(retry('docker', 'buildx', 'imagetools', 'inspect', tag, '--format', '{{json .Manifest}}'))['digest']
         Path('metadata').mkdir(exist_ok=True)
         Path(f'metadata/{arch}.json').write_text(json.dumps({'arch': arch, 'reference': image + '@' + digest}))
         output('digest', digest)
