@@ -20,6 +20,6 @@ test('Studio manages print services and printers through PrintHub', () => {
 })
 
 test('printer navigation has a dedicated management view', () => {
-  assert.match(studioSource, /View = 'templates' \| 'print' \| 'designer' \| 'printers' \| 'jobs'/)
+  assert.match(studioSource, /type View = [^\n]*'printers'/)
   assert.match(studioSource, /view === 'printers'/)
 })

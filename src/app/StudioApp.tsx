@@ -13,8 +13,9 @@ import TemplateStoreDialog from '../ui/TemplateStoreDialog'
 import TreePanel from '../ui/TreePanel'
 import ValidationPanel from '../ui/ValidationPanel'
 import ToolbarPopover from '../ui/ToolbarPopover'
+import RasterDesigner from '../ui/RasterDesigner'
 
-type View = 'templates' | 'print' | 'designer' | 'printers' | 'jobs'
+type View = 'templates' | 'print' | 'designer' | 'image-designer' | 'printers' | 'jobs'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
 type PrintJob = PrintJobResponse
 type RenderTarget = { width_mm: number; height_mm: number; dpi: number; origin_x_mm: number; origin_y_mm: number }
@@ -23,7 +24,7 @@ type OutputSizeMode = 'template' | 'printer' | 'custom'
 const currentView = (): View => {
   if (new URLSearchParams(window.location.search).get('draft_id')) return 'print'
   const value = window.location.hash.replace('#/', '')
-  return value === 'print' || value === 'designer' || value === 'printers' || value === 'jobs' ? value : 'templates'
+  return value === 'print' || value === 'designer' || value === 'image-designer' || value === 'printers' || value === 'jobs' ? value : 'templates'
 }
 
 const navigate = (view: View) => {
@@ -43,6 +44,7 @@ function AppNav({ view }: { view: View }) {
     ['templates', 'Templates', 'Ready to fill and print'],
     ['print', 'Quick print', 'Fill and send a label'],
     ['designer', 'Designer', 'Desktop label editor'],
+    ['image-designer', 'Image designer', 'Text, images and raster printing'],
     ['printers', 'Printers', 'Connections, media and status'],
     ['jobs', 'Print jobs', 'Held, failed and recent jobs']
   ]
@@ -504,5 +506,5 @@ export default function StudioApp() {
       document.body.classList.remove('designer-viewport')
     }
   }, [view])
-  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'printers' && <PrinterManagement onNotice={setNotice} />}{view === 'jobs' && <PrintJobs onNotice={setNotice} />}</div></div>
+  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'image-designer' && <RasterDesigner />}{view === 'printers' && <PrinterManagement onNotice={setNotice} />}{view === 'jobs' && <PrintJobs onNotice={setNotice} />}</div></div>
 }

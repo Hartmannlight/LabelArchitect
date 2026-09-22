@@ -484,3 +484,17 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .job-preview { width: 100%; height: 180px; }
   .job-actions { justify-content: flex-start; }
 }
+/* Optional bitmap editor: physical coordinates, printer-resolution preview. */
+.raster-designer { padding: 24px; max-width: 1400px; margin: auto; }
+.raster-designer > .notice { position: static; transform: none; width: auto; margin: 12px 0; }
+.raster-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; border: 1px solid #8886; border-radius: 12px; margin: 16px 0; }
+.raster-controls label, .raster-properties label { display: flex; flex-direction: column; gap: 5px; }
+.raster-controls input[type=number] { width: 100px; }
+.raster-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 24px; }
+.raster-paper-area { padding: 24px; background: #8882; overflow: hidden; }
+.raster-paper { position: relative; width: 100%; max-width: 680px; background: white; box-shadow: 0 3px 16px #0003; touch-action: none; overflow: hidden; }
+.raster-paper img { display: block; width: 100%; height: 100%; pointer-events: none; image-rendering: pixelated; }
+.raster-selection { position: absolute; border: 2px dashed #2777e8; pointer-events: none; }
+.raster-properties { display: flex; flex-direction: column; gap: 12px; border: 1px solid #8886; border-radius: 12px; padding: 16px; min-width: 0; }
+.raster-properties textarea { min-height: 100px; }
+@media (max-width: 760px) { .raster-workspace { grid-template-columns: 1fr; } .raster-designer { padding: 12px; } }
