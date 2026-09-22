@@ -45,3 +45,4 @@ test('import refuses remote images, excessive sizes, invalid numbers and duplica
   assert.throws(() => parseRasterDesign({ ...emptyRasterDesign(), elements: [rect, rect] }))
   assert.throws(() => parseRasterDesign({ ...emptyRasterDesign(), elements: [{ ...rect, x: NaN }] }))
 })
+import { Buffer } from 'node:buffer';
