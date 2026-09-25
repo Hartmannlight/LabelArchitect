@@ -37,6 +37,7 @@ export type TemplateEditorState = {
   validationIssues: string[]
   backendTemplateId: string | null
   variableValues: Record<string, string>
+  draftPreviewDataUrl: string | null
 
   newTemplate: () => void
   setTool: (tool: Tool) => void
@@ -47,6 +48,7 @@ export type TemplateEditorState = {
   loadTemplate: (doc: TemplateDoc) => void
   setVariableValue: (key: string, value: string) => void
   syncVariableKeys: (keys: string[]) => void
+  setDraftPreviewDataUrl: (url: string | null) => void
 
   setTemplateName: (name: string) => void
   setDefaultsRaw: (defaults: any) => void
@@ -246,11 +248,12 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     validationIssues: validate(initial),
     backendTemplateId: null,
     variableValues: initialVariables,
+    draftPreviewDataUrl: null,
 
     newTemplate: () => {
       const next = defaultDoc()
       const h = reset(get().history, next)
-      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(next), backendTemplateId: null })
+      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(next), backendTemplateId: null, variableValues: {}, draftPreviewDataUrl: null })
     },
 
     setTool: (tool) => set({ tool }),
@@ -261,8 +264,9 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     loadTemplate: (doc) => {
       const normalized = withProjectDefaults(doc)
       const h = reset(get().history, normalized)
-      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(normalized) })
+      set({ history: h, selection: { nodeId: 'r' }, validationIssues: validate(normalized), variableValues: {}, draftPreviewDataUrl: null })
     },
+    setDraftPreviewDataUrl: (url) => set({ draftPreviewDataUrl: url }),
     setVariableValue: (key, value) =>
       set((state) => ({ variableValues: { ...state.variableValues, [key]: value } })),
     syncVariableKeys: (keys) =>

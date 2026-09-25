@@ -15,7 +15,7 @@ import ValidationPanel from '../ui/ValidationPanel'
 import ToolbarPopover from '../ui/ToolbarPopover'
 import RasterDesigner from '../ui/RasterDesigner'
 
-type View = 'templates' | 'print' | 'designer' | 'image-designer' | 'printers' | 'jobs'
+type View = 'templates' | 'assistant' | 'print' | 'designer' | 'image-designer' | 'printers' | 'jobs'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
 type PrintJob = PrintJobResponse
 type RenderTarget = { width_mm: number; height_mm: number; dpi: number; origin_x_mm: number; origin_y_mm: number }
@@ -24,7 +24,7 @@ type OutputSizeMode = 'template' | 'printer' | 'custom'
 const currentView = (): View => {
   if (new URLSearchParams(window.location.search).get('draft_id')) return 'print'
   const value = window.location.hash.replace('#/', '')
-  return value === 'print' || value === 'designer' || value === 'image-designer' || value === 'printers' || value === 'jobs' ? value : 'templates'
+  return value === 'assistant' || value === 'print' || value === 'designer' || value === 'image-designer' || value === 'printers' || value === 'jobs' ? value : 'templates'
 }
 
 const navigate = (view: View) => {
@@ -42,6 +42,7 @@ function Brand() {
 function AppNav({ view }: { view: View }) {
   const entries: Array<[View, string, string]> = [
     ['templates', 'Templates', 'Ready to fill and print'],
+    ['assistant', 'AI template assistant', 'Draft labels from a description'],
     ['print', 'Quick print', 'Fill and send a label'],
     ['designer', 'Designer', 'Desktop label editor'],
     ['image-designer', 'Image designer', 'Text, images and raster printing'],
@@ -99,7 +100,7 @@ function printerRenderTarget(printer: Record<string, any> | undefined): RenderTa
   }
 }
 
-function TemplatePreview({ templateId, available }: { templateId: string; available?: boolean }) {
+function TemplatePreview({ templateId, available, revision }: { templateId: string; available?: boolean; revision?: number }) {
   const [url, setUrl] = useState<string | null>(null)
   const [sampleText, setSampleText] = useState<string | null>(null)
   useEffect(() => {
@@ -115,31 +116,152 @@ function TemplatePreview({ templateId, available }: { templateId: string; availa
     }
     getBackendSdk().templates.getPreview(templateId).then((blob) => { if (!active) return; objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) }).catch(() => setUrl(null))
     return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [available, templateId])
+  }, [available, templateId, revision])
   return url ? <img src={url} alt='' /> : sampleText ? <div className='template-text-preview' aria-label='Template sample preview'>{sampleText}</div> : <div className='preview-placeholder'>Preview</div>
 }
 
 function TemplateLibrary({ onNotice }: { onNotice: (notice: Notice) => void }) {
   const { items, loading, error, refresh } = useTemplates()
   const [query, setQuery] = useState('')
+  const [section, setSection] = useState<'active' | 'favorites' | 'archived' | 'all'>('active')
+  const [sort, setSort] = useState<'name' | 'recent' | 'size'>('name')
+  const [previewSettings, setPreviewSettings] = useState<{ stored_enabled: boolean; live_enabled: boolean } | null>(null)
+  const [previewRevision, setPreviewRevision] = useState(0)
   const loadTemplate = useTemplateEditorStore((state) => state.loadTemplate)
+  const newTemplate = useTemplateEditorStore((state) => state.newTemplate)
   const setBackendTemplateId = useTemplateEditorStore((state) => state.setBackendTemplateId)
   const setPreviewTarget = useTemplateEditorStore((state) => state.setPreviewTarget)
-  const filtered = items.filter((item) => `${item.name} ${item.id} ${(item.tags ?? []).join(' ')}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const setVariableValue = useTemplateEditorStore((state) => state.setVariableValue)
+  const filtered = items.filter((item) => {
+    if (section === 'active' && item.archived) return false
+    if (section === 'favorites' && (!item.favorite || item.archived)) return false
+    if (section === 'archived' && !item.archived) return false
+    return `${item.name} ${item.id} ${item.description ?? ''} ${item.usage_context ?? ''} ${(item.tags ?? []).join(' ')}`.toLowerCase().includes(query.trim().toLowerCase())
+  }).sort((a, b) => sort === 'recent'
+    ? (b.updated_at ?? '').localeCompare(a.updated_at ?? '') || a.name.localeCompare(b.name)
+    : sort === 'size'
+      ? Number(a.preview_target.width_mm) * Number(a.preview_target.height_mm) - Number(b.preview_target.width_mm) * Number(b.preview_target.height_mm) || a.name.localeCompare(b.name)
+      : a.name.localeCompare(b.name))
+  const changeMetadata = async (id: string, changes: { favorite?: boolean; archived?: boolean }) => {
+    try { await getBackendSdk().templates.updateMetadata(id, changes); await refresh() }
+    catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) }
+  }
+  useEffect(() => {
+    fetch(buildApiUrl(backendBase, '/v1/template-preview-settings')).then((response) => response.ok ? response.json() : null).then(setPreviewSettings).catch(() => setPreviewSettings(null))
+  }, [])
+  const regeneratePreviews = async () => {
+    const token = sessionStorage.getItem('printhub:adminToken') ?? ''
+    if (!token) { onNotice({ tone: 'info', text: 'Enter the PrintHub admin token under Printers first.' }); return }
+    if (filtered.length > 50) { onNotice({ tone: 'info', text: 'Filter the library to at most 50 templates first.' }); return }
+    try {
+      const result = await adminRequest('/v1/templates/previews/regenerate', token, { method: 'POST', body: JSON.stringify({ template_ids: filtered.map((item) => item.id) }) })
+      await refresh(); setPreviewRevision((current) => current + 1)
+      const failed = Object.keys(result.failed ?? {}).length
+      onNotice({ tone: failed ? 'error' : 'success', text: `${result.regenerated?.length ?? 0} thumbnails regenerated${failed ? `, ${failed} failed` : ''}.` })
+    } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) }
+  }
   const edit = async (id: string) => {
     try {
       const detail = await getBackendSdk().templates.get(id)
       loadTemplate(detail.template as any); setBackendTemplateId(detail.id)
+      Object.entries(detail.sample_data ?? {}).forEach(([name, value]) => setVariableValue(name, String(value ?? '')))
       setPreviewTarget({ width_mm: Number(detail.preview_target.width_mm), height_mm: Number(detail.preview_target.height_mm), dpi: Number(detail.preview_target.dpi) })
       navigate('designer')
     } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) }
   }
   return <main className='page-shell'>
-    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Choose a template and print</h1><p>Every template shown here is ready to fill and print directly.</p></div><button className='primary-action' type='button' onClick={() => navigate('designer')}>New template</button></header>
-    <div className='library-toolbar'><label><span className='sr-only'>Search templates</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search saved templates and tags' /></label><button type='button' onClick={refresh}>Refresh</button></div>
+    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Choose a template and print</h1><p>Favorites keep frequent labels close. Archive hides saved templates until needed.</p></div><button className='primary-action' type='button' onClick={() => { newTemplate(); navigate('designer') }}>New template</button></header>
+    <div className='library-toolbar'><label><span className='sr-only'>Search templates</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search name, description, context and tags' /></label><select aria-label='Template section' value={section} onChange={(event) => setSection(event.target.value as typeof section)}><option value='active'>Active</option><option value='favorites'>Favorites</option><option value='archived'>Archive</option><option value='all'>All</option></select><select aria-label='Sort templates' value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value='name'>Name</option><option value='recent'>Recently changed</option><option value='size'>Label size</option></select><button type='button' onClick={refresh}>Refresh</button><button type='button' onClick={() => void regeneratePreviews()} disabled={!previewSettings?.stored_enabled || filtered.length === 0}>Regenerate thumbnails</button></div>
+    {previewSettings && !previewSettings.stored_enabled && <div className='notice notice-info' role='status'>Stored template previews are disabled. Set ZPLGRID_ENABLE_LABELARY_TEMPLATES=1 to generate thumbnails. Live preview can remain off.</div>}
     {loading && <div className='empty-state'>Loading templates…</div>}{error && <div className='empty-state error-state'>{error}</div>}
     {!loading && !error && !filtered.length && <div className='empty-state'>No matching templates. Create the first one in Designer.</div>}
-    <div className='template-grid'>{filtered.map((template) => <article className='template-card' key={template.id}><div className='template-preview'><TemplatePreview templateId={template.id} available={template.preview_available} /></div><div className='template-card-body'><div className='template-meta'><span>{String(template.preview_target.width_mm)} × {String(template.preview_target.height_mm)} mm</span><span>{template.variables?.length ?? 0} fields</span></div><h2>{template.name}</h2><p>{template.tags?.length ? template.tags.join(' · ') : 'General purpose'}</p><div className='card-actions'><button type='button' className='primary-action' onClick={() => { sessionStorage.setItem('printhub:selectedTemplate', template.id); navigate('print') }}>Use template</button><button type='button' onClick={() => void edit(template.id)}>Edit</button></div></div></article>)}</div>
+    <div className='template-grid'>{filtered.map((template) => <article className='template-card' key={template.id}><div className='template-preview'><TemplatePreview templateId={template.id} available={template.preview_available} revision={previewRevision} /></div><div className='template-card-body'><div className='template-meta'><span>{String(template.preview_target.width_mm)} × {String(template.preview_target.height_mm)} mm</span><span>{template.variables?.length ?? 0} fields</span></div><h2>{template.name}</h2><p>{template.description || (template.tags?.length ? template.tags.join(' · ') : 'General purpose')}</p>{template.usage_context && <small className='field-help'>{template.usage_context}</small>}<div className='card-actions'><button type='button' className='primary-action' onClick={() => { sessionStorage.setItem('printhub:selectedTemplate', template.id); navigate('print') }}>Use template</button><button type='button' onClick={() => void edit(template.id)}>Edit</button><button type='button' onClick={() => void changeMetadata(template.id, { favorite: !template.favorite })} aria-label={template.favorite ? `Remove ${template.name} from favorites` : `Add ${template.name} to favorites`}>{template.favorite ? '★ Favorite' : '☆ Favorite'}</button><button type='button' onClick={() => void changeMetadata(template.id, { archived: !template.archived })}>{template.archived ? 'Restore' : 'Archive'}</button></div></div></article>)}</div>
+  </main>
+}
+
+type AITemplateDraft = {
+  name: string; description: string; usage_context: string; tags: string[]
+  variables: Array<Record<string, unknown>>; sample_data: Record<string, unknown>
+  print_defaults: Record<string, unknown>; template: Record<string, any>
+  preview_target: RenderTarget; reference_ids: string[]
+  preview_png_base64?: string | null; preview_error?: string | null
+}
+
+function TemplateAssistant({ onNotice }: { onNotice: (notice: Notice) => void }) {
+  const templates = useTemplates()
+  const [prompt, setPrompt] = useState('')
+  const [token, setToken] = useState(() => sessionStorage.getItem('printhub:adminToken') ?? '')
+  const [width, setWidth] = useState(50)
+  const [height, setHeight] = useState(25)
+  const [useExisting, setUseExisting] = useState(false)
+  const [referenceQuery, setReferenceQuery] = useState('')
+  const [referenceIds, setReferenceIds] = useState<string[]>([])
+  const [draft, setDraft] = useState<AITemplateDraft | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const loadTemplate = useTemplateEditorStore((state) => state.loadTemplate)
+  const setBackendTemplateId = useTemplateEditorStore((state) => state.setBackendTemplateId)
+  const setPreviewTarget = useTemplateEditorStore((state) => state.setPreviewTarget)
+  const syncVariableKeys = useTemplateEditorStore((state) => state.syncVariableKeys)
+  const setVariableValue = useTemplateEditorStore((state) => state.setVariableValue)
+  const setDraftPreviewDataUrl = useTemplateEditorStore((state) => state.setDraftPreviewDataUrl)
+  const referenceOptions = templates.items.filter((item) => referenceIds.includes(item.id) || (!item.archived && `${item.name} ${item.description ?? ''} ${item.usage_context ?? ''} ${(item.tags ?? []).join(' ')}`.toLowerCase().includes(referenceQuery.trim().toLowerCase()))).sort((a, b) => Number(referenceIds.includes(b.id)) - Number(referenceIds.includes(a.id))).slice(0, 12)
+  const generate = async () => {
+    setError(null); setDraft(null)
+    if (prompt.trim().length < 10 || !token.trim() || width <= 0 || height <= 0) { setError('Enter a description, admin token and valid label size.'); return }
+    if (useExisting && referenceIds.length === 0) { setError('Choose at least one reference template or turn off references.'); return }
+    setBusy(true)
+    sessionStorage.setItem('printhub:adminToken', token.trim())
+    try {
+      const result = await adminRequest('/v1/template-assistant/generate', token.trim(), {
+        method: 'POST',
+        body: JSON.stringify({ prompt: prompt.trim(), target: { width_mm: width, height_mm: height, dpi: 203, origin_x_mm: 0, origin_y_mm: 0 }, use_existing: useExisting, reference_ids: useExisting ? referenceIds : [] }),
+      })
+      setDraft(result as AITemplateDraft)
+    } catch (reason) { setError(errorText(reason)) }
+    finally { setBusy(false) }
+  }
+  const openInDesigner = () => {
+    if (!draft) return
+    const embedded = { ...(draft.template.extensions ?? {}), printhub: {
+      description: draft.description, usage_context: draft.usage_context, tags: draft.tags,
+      variables: draft.variables, sample_data: draft.sample_data, print_defaults: draft.print_defaults,
+    } }
+    loadTemplate({ ...draft.template, name: draft.name, extensions: embedded } as any)
+    setDraftPreviewDataUrl(draft.preview_png_base64 ? `data:image/png;base64,${draft.preview_png_base64}` : null)
+    const variableNames = draft.variables.map((variable) => String(variable.name ?? '')).filter(Boolean)
+    syncVariableKeys(variableNames)
+    variableNames.forEach((name) => setVariableValue(name, String(draft.sample_data[name] ?? '')))
+    setBackendTemplateId(null)
+    setPreviewTarget(draft.preview_target)
+    navigate('designer')
+    onNotice({ tone: 'info', text: 'AI draft opened in Designer. The generated preview is a snapshot; save after reviewing your edits.' })
+  }
+  return <main className='page-shell'><header className='page-heading'><div><span className='eyebrow'>Template assistant</span><h1>Describe a label</h1><p>Review the generated preview here, then edit the draft in Designer before saving.</p></div></header>
+    <section className='management-card'><div className='variable-form'>
+      <label className='field'><span>What should the label show?</span><textarea rows={6} maxLength={4000} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder='For example: a cable flag with source and destination, plus a QR code for the asset ID.' /></label>
+      <div className='assistant-size-row'><label className='field'><span>Width (mm)</span><input type='number' min='1' step='1' value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label><label className='field'><span>Height (mm)</span><input type='number' min='1' step='1' value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label></div>
+      <label><input type='checkbox' checked={useExisting} onChange={(event) => setUseExisting(event.target.checked)} /> Use selected saved templates as examples</label>
+      {useExisting && <div className='assistant-references'>
+        <label className='field'><span>Find reference templates</span><input value={referenceQuery} onChange={(event) => setReferenceQuery(event.target.value)} placeholder='Search names, descriptions and tags' /></label>
+        <small className='field-help'>Selected ({referenceIds.length}/3): {referenceIds.length ? referenceIds.map((id) => templates.items.find((item) => item.id === id)?.name || id).join(', ') : 'none'}</small>
+        {templates.loading && <small className='field-help'>Loading templates…</small>}
+        {templates.error && <small className='field-help'>{templates.error}</small>}
+        {referenceOptions.map((item) => <label className='assistant-reference' key={item.id}>
+          <input type='checkbox' checked={referenceIds.includes(item.id)} disabled={!referenceIds.includes(item.id) && referenceIds.length >= 3} onChange={(event) => setReferenceIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
+          <span><strong>{item.name}</strong><small>{item.description || item.usage_context || item.id}</small></span>
+        </label>)}
+        <small className='field-help'>Select up to three. Only these templates’ descriptions and layouts are sent to OpenRouter when you generate the draft. Sample data is excluded.</small>
+      </div>}
+      <label className='field'><span>PrintHub admin token</span><input type='password' value={token} onChange={(event) => setToken(event.target.value)} placeholder='Token from Printers' /><small className='field-help'>Stored in this browser tab only.</small></label>
+      <div className='quick-actions'><button type='button' className='primary-action' disabled={busy} onClick={() => void generate()}>{busy ? 'Generating…' : 'Generate draft'}</button></div>
+      {error && <div className='empty-state error-state' role='alert'>{error}</div>}
+    </div></section>
+    {draft && <section className='management-card assistant-result'><h2>{draft.name}</h2><p>{draft.description}</p><p>{draft.usage_context}</p><div className='template-meta'><span>{draft.preview_target.width_mm} × {draft.preview_target.height_mm} mm</span><span>{draft.variables.length} fields</span><span>{draft.tags.join(' · ')}</span></div>
+      {draft.preview_png_base64 ? <img className='assistant-draft-preview' src={`data:image/png;base64,${draft.preview_png_base64}`} alt={`Preview of ${draft.name} with example values`} /> : <p className='field-help' role='status'>Preview unavailable: {draft.preview_error || 'The image could not be generated.'}</p>}
+      <div className='assistant-sample-list'><strong>Preview examples</strong>{Object.entries(draft.sample_data).map(([name, value]) => <span key={name}><code>{name}</code>: {String(value)}</span>)}</div>
+      {draft.reference_ids.length > 0 && <small className='field-help'>Based on: {draft.reference_ids.map((id) => templates.items.find((item) => item.id === id)?.name || id).join(', ')}</small>}
+      <div className='quick-actions'><button type='button' className='primary-action' onClick={openInDesigner}>Open draft in Designer</button></div></section>}
   </main>
 }
 
@@ -252,8 +374,19 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
     if (!enabled.some((printer) => String(printer.id) === printerId)) setPrinterId(printerData.defaultPrinterId ?? String(enabled[0]?.id ?? ''))
   }, [printerData.printers, printerData.defaultPrinterId, printerData.loading, printerData.error, printerId])
   useEffect(() => {
-    if (!templateId) { if (!draftId) setTemplate(null); return }
-    getBackendSdk().templates.get(templateId).then((detail) => { setTemplate(detail); const sample = detail.sample_data ?? {}; const next: Record<string, string> = {}; (detail.variables ?? []).forEach((variable: any) => { const name = String(variable.name ?? ''); if (name) next[name] = String((sample as any)[name] ?? variable.default ?? '') }); setValues(next) }).catch((reason) => onNotice({ tone: 'error', text: errorText(reason) }))
+    if (draftId) return
+    let active = true
+    setTemplate(null)
+    setValues({})
+    if (templateId) getBackendSdk().templates.get(templateId).then((detail) => {
+      if (!active) return
+      setTemplate(detail)
+      const defaults = detail.print_defaults ?? {}
+      const next: Record<string, string> = {};
+      (detail.variables ?? []).forEach((variable: any) => { const name = String(variable.name ?? ''); if (name) next[name] = String((defaults as any)[name] ?? '') })
+      setValues(next)
+    }).catch((reason) => { if (active) onNotice({ tone: 'error', text: errorText(reason) }) })
+    return () => { active = false }
   }, [draftId, onNotice, templateId])
   useEffect(() => {
     if (!draftId) return
@@ -274,18 +407,19 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
     if ((outputMode === 'native' && !supportsNative) || (outputMode === 'raster' && !supportsRaster)) setOutputMode('auto')
   }, [outputMode, supportsNative, supportsRaster])
   const renderTarget = intendedTarget ? sizeMode === 'template' ? intendedTarget : sizeMode === 'printer' ? loadedTarget : customTarget : null
-  const renderBody = () => template && renderTarget ? { template: template.template, variables: values, target: renderTarget as any, debug: false } : null
+  const templateReady = Boolean(template && (draftId ? template.id === `draft:${draftId}` : template.id === templateId))
+  const renderBody = () => templateReady && template && renderTarget ? { template: template.template, variables: values, target: renderTarget as any, debug: false } : null
   const preview = async () => { const body = renderBody(); if (!body) return; setBusy('preview'); try { const rendered = await getBackendSdk().renders.renderPngDetailed(body); const next = URL.createObjectURL(rendered.blob); setPrintWarnings(rendered.diagnostics.map((item) => item.message)); setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return next }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
-  const print = async () => { if (!template || !printerId) return; setBusy('print'); try { const body = renderBody(); if (!body) return; const preflight = await getBackendSdk().renders.renderZpl(body); const warnings = (preflight.diagnostics ?? []).map((item) => item.message); setPrintWarnings(warnings); if (warnings.length && !window.confirm(`This label has ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return; const source = !draftId && templateId ? { template_id: templateId } : { template: template.template }; const result = await getBackendSdk().printJobs.create({ printer_id: printerId, ...source, variables: values, target: renderTarget as any, output_mode: outputMode, origin: 'printhub-studio' }); localStorage.setItem('printhub:printer', printerId); onNotice(result.status === 'failed' ? { tone: 'error', text: result.error ?? 'Print failed.' } : { tone: 'success', text: `Print job ${result.id} ${result.status}.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
+  const print = async () => { if (!template || !templateReady || !printerId) return; const selectedId = template.id; setBusy('print'); try { const body = renderBody(); if (!body) return; const preflight = await getBackendSdk().renders.renderZpl(body); const warnings = (preflight.diagnostics ?? []).map((item) => item.message); setPrintWarnings(warnings); if (warnings.length && !window.confirm(`This label has ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return; const source = !draftId ? { template_id: selectedId } : { template: template.template }; const result = await getBackendSdk().printJobs.create({ printer_id: printerId, ...source, variables: values, target: renderTarget as any, output_mode: outputMode, origin: 'printhub-studio' }); localStorage.setItem('printhub:printer', printerId); onNotice(result.status === 'failed' ? { tone: 'error', text: result.error ?? 'Print failed.' } : { tone: 'success', text: `Print job ${result.id} ${result.status}.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
   return <main className='page-shell quick-print-page'><header className='page-heading compact'><div><span className='eyebrow'>Quick print</span><h1>Choose, fill, print</h1><p>This view is designed for phones, scanners and quick repeat jobs.</p></div></header><div className='quick-print-layout'><section className='form-panel'>
-    {!draftId && <label className='field'><span>Template</span><select value={templateId} onChange={(event) => { setTemplateId(event.target.value); sessionStorage.setItem('printhub:selectedTemplate', event.target.value) }}><option value=''>Choose a template…</option>{templates.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+    {!draftId && <label className='field'><span>Template</span><select value={templateId} disabled={busy !== null} onChange={(event) => { setTemplateId(event.target.value); sessionStorage.setItem('printhub:selectedTemplate', event.target.value) }}><option value=''>Choose a template…</option>{templates.items.filter((item) => !item.archived || item.id === templateId).sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id}>{item.favorite ? '★ ' : ''}{item.name}{item.archived ? ' (archived)' : ''}</option>)}</select></label>}
     {template && intendedTarget && <div className='selected-template'><strong>{template.name}</strong><span>Designed for {formatSize(intendedTarget)}</span></div>}
     <div className='variable-form'>{(template?.variables ?? []).filter((entry: any) => !String(entry.name ?? '').startsWith('_')).map((entry: any) => <FieldInput key={String(entry.name)} definition={entry} value={values[String(entry.name)] ?? ''} onChange={(value) => setValues((current) => ({ ...current, [String(entry.name)]: value }))} />)}</div>
     <label className='field'><span>Printer</span><select value={printerId} onChange={(event) => { const nextId = event.target.value; const nextPrinter = printerData.printers.find((printer) => String(printer.id) === nextId); setPrinterId(nextId); setSizeMode(printerRenderTarget(nextPrinter) ? 'printer' : 'template') }}><option value=''>Choose a printer…</option>{printerData.printers.filter((printer) => printer.enabled !== false).map((printer) => <option key={printer.id} value={printer.id}>{printerOptionLabel(printer)}</option>)}</select><small className='field-help'>{selectedPrinter ? `Printer ID: ${selectedPrinter.id}` : 'Select where the finished label should be sent.'}</small></label>
     {selectedPrinter && <label className='field'><span>Print format</span><select value={outputMode} onChange={(event) => setOutputMode(event.target.value as 'auto' | 'native' | 'raster')}><option value='auto'>Automatic — prefer native ZPL</option><option value='native' disabled={!supportsNative}>Native ZPL</option><option value='raster' disabled={!supportsRaster}>Rendered image</option></select><small className='field-help'>{outputMode === 'raster' ? 'The complete label is rendered through Labelary and sent as pixels.' : outputMode === 'native' ? 'The printer receives the compiled ZPL directly.' : supportsNative ? 'This printer will receive native ZPL.' : 'This printer will receive a rendered raster image.'}</small></label>}
     {template && intendedTarget && <OutputSizePicker mode={sizeMode} onMode={setSizeMode} templateTarget={intendedTarget} printerTarget={loadedTarget} printerName={String(selectedPrinter?.name ?? selectedPrinter?.id ?? 'the selected printer')} customTarget={customTarget} onCustomTarget={setCustomTarget} />}
     {printWarnings.length > 0 && <div className='builder-warning' role='status'><strong>Text layout warnings</strong><ul className='list-disc pl-5'>{printWarnings.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul></div>}
-    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!template || !renderTarget || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!template || !renderTarget || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
+    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!templateReady || !renderTarget || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!templateReady || !renderTarget || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
   </section><section className='print-preview' aria-label='Label preview'>{previewUrl ? <><div className='preview-size-badge'>{formatSize(renderTarget)}</div><img src={previewUrl} alt='Rendered label preview' /></> : <div className='preview-placeholder'>{template && renderTarget ? `Preview will use ${formatSize(renderTarget)}` : 'Select a template'}</div>}</section></div></main>
 }
 
@@ -506,5 +640,5 @@ export default function StudioApp() {
       document.body.classList.remove('designer-viewport')
     }
   }, [view])
-  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'image-designer' && <RasterDesigner />}{view === 'printers' && <PrinterManagement onNotice={setNotice} />}{view === 'jobs' && <PrintJobs onNotice={setNotice} />}</div></div>
+  return <div className={`studio-app theme-${theme}${view === 'designer' ? ' designer-mode' : ''}`}><aside className='studio-sidebar'><Brand /><AppNav view={view} /><div className='sidebar-footer'><span>PrintHub works without Thingdex.</span><button type='button' onClick={toggleTheme}>{theme === 'dark' ? 'Light theme' : 'Dark theme'}</button></div></aside><div className='studio-main'><div className='mobile-topbar'><Brand /><button type='button' onClick={() => navigate('print')}>Quick print</button></div><NoticeBar notice={notice} onClose={() => setNotice(null)} />{view === 'templates' && <TemplateLibrary onNotice={setNotice} />}{view === 'assistant' && <TemplateAssistant onNotice={setNotice} />}{view === 'print' && <QuickPrint onNotice={setNotice} />}{view === 'designer' && <Designer />}{view === 'image-designer' && <RasterDesigner />}{view === 'printers' && <PrinterManagement onNotice={setNotice} />}{view === 'jobs' && <PrintJobs onNotice={setNotice} />}</div></div>
 }

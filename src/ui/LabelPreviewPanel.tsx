@@ -1,5 +1,6 @@
 import { type MouseEvent, type SyntheticEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { getRenderSdk } from '../api/sdk'
+import { backendBase, buildApiUrl } from '../api/config'
 import { computeLayout } from '../model/layout'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
@@ -14,6 +15,7 @@ export default function LabelPreviewPanel() {
   const doc = useTemplateEditorStore((s) => s.history.present)
   const preview = useTemplateEditorStore((s) => s.preview)
   const variableValues = useTemplateEditorStore((s) => s.variableValues)
+  const draftPreviewDataUrl = useTemplateEditorStore((s) => s.draftPreviewDataUrl)
   const selectNode = useTemplateEditorStore((s) => s.selectNode)
   const settings = useTemplateEditorStore((s) => s.settings)
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
@@ -23,6 +25,7 @@ export default function LabelPreviewPanel() {
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const zoom = settings.previewZoom
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null)
+  const [liveEnabled, setLiveEnabled] = useState<boolean | null>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
   const minZoom = 0.25
   const maxZoom = 5
@@ -36,6 +39,19 @@ export default function LabelPreviewPanel() {
   }, [requiredVariables, variableValues])
 
   useEffect(() => {
+    let active = true
+    fetch(buildApiUrl(backendBase, '/v1/template-preview-settings'))
+      .then((response) => { if (!response.ok) throw new Error('Preview settings unavailable'); return response.json() })
+      .then((settings) => { if (active) setLiveEnabled(settings.live_enabled !== false) })
+      .catch(() => { if (active) setLiveEnabled(true) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    if (liveEnabled !== true) {
+      if (liveEnabled === false) { setStatus('idle'); setError(null); setDiagnostics([]) }
+      return
+    }
     let active = true
     const controller = new AbortController()
     const timeout = setTimeout(async () => {
@@ -83,7 +99,7 @@ export default function LabelPreviewPanel() {
       clearTimeout(timeout)
       controller.abort()
     }
-  }, [doc, preview.width_mm, preview.height_mm, preview.dpi, renderVariables])
+  }, [doc, preview.width_mm, preview.height_mm, preview.dpi, renderVariables, liveEnabled])
 
   useEffect(() => {
     return () => {
@@ -144,6 +160,7 @@ export default function LabelPreviewPanel() {
           {status === 'error' && <span className='text-danger'>Render failed: {error}</span>}
           {status === 'idle' && diagnostics.length === 0 && <span className='text-subtle'>Updates 2s after last change</span>}
           {status === 'idle' && diagnostics.length > 0 && <span className='text-warn' title={diagnostics.join('\n')}>⚠ Label warnings ({diagnostics.length})</span>}
+          {liveEnabled === false && <span className='text-subtle'>Live preview is off</span>}
         </div>
       </div>
       {diagnostics.length > 0 && (
@@ -175,6 +192,8 @@ export default function LabelPreviewPanel() {
                     : undefined
                 }
               />
+            ) : draftPreviewDataUrl && liveEnabled === false ? (
+              <div className='p-3 text-center'><img src={draftPreviewDataUrl} alt='Generated draft snapshot with example values' className='max-w-full max-h-[320px] mx-auto' /><p className='text-xs text-muted mt-2'>Generated snapshot. Edits are not shown until a new preview is made.</p></div>
             ) : (
               <div className='text-sm text-muted'>No preview yet</div>
             )}
