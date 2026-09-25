@@ -1,5 +1,5 @@
 import type { TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getBackendSdk } from '../api/sdk'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
@@ -26,6 +26,15 @@ function parseTags(value: string) {
     .filter(Boolean)
 }
 
+function updateJsonField(source: string, name: string, value: string, removeEmpty: boolean): string | null {
+  const parsed = parseJson<Record<string, unknown>>(source, {})
+  if (!parsed.ok || !parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return null
+  const next = { ...parsed.value }
+  if (removeEmpty && !value) delete next[name]
+  else next[name] = value
+  return JSON.stringify(next, null, 2)
+}
+
 function normalizeVariableDefs(value: unknown) {
   if (!Array.isArray(value)) return [] as Array<Record<string, unknown> & { name: string; mode?: string; default?: unknown }>
   const out: Array<Record<string, unknown> & { name: string; mode?: string; default?: unknown }> = []
@@ -48,6 +57,7 @@ export default function TemplateStoreDialog(props: Props) {
   const loadTemplate = useTemplateEditorStore((s) => s.loadTemplate)
   const setPreviewTarget = useTemplateEditorStore((s) => s.setPreviewTarget)
   const variableValues = useTemplateEditorStore((s) => s.variableValues)
+  const setVariableValue = useTemplateEditorStore((s) => s.setVariableValue)
 
   const [items, setItems] = useState<TemplateListItem[]>([])
   const [filterTags, setFilterTags] = useState('')
@@ -55,14 +65,21 @@ export default function TemplateStoreDialog(props: Props) {
   const [details, setDetails] = useState<TemplateDetails | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error' | 'saving'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
+  const detailsRequest = useRef(0)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewStatus, setPreviewStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [previewError, setPreviewError] = useState<string | null>(null)
 
   const [name, setName] = useState(doc.name ?? '')
+  const [description, setDescription] = useState('')
+  const [usageContext, setUsageContext] = useState('')
+  const [favorite, setFavorite] = useState(false)
+  const [archived, setArchived] = useState(false)
   const [tags, setTags] = useState('')
   const [variablesText, setVariablesText] = useState('[]')
   const [sampleDataText, setSampleDataText] = useState('{}')
+  const [printDefaultsText, setPrintDefaultsText] = useState('{}')
   const [variablesTouched, setVariablesTouched] = useState(false)
   const [sampleDataTouched, setSampleDataTouched] = useState(false)
 
@@ -105,7 +122,7 @@ export default function TemplateStoreDialog(props: Props) {
     [preview.dpi, preview.height_mm, preview.width_mm]
   )
 
-  const refreshList = async () => {
+  const refreshList = useCallback(async () => {
     setStatus('loading')
     setError(null)
     try {
@@ -119,29 +136,44 @@ export default function TemplateStoreDialog(props: Props) {
       setStatus('error')
       setError(String(e?.message ?? e))
     }
-  }
+  }, [filterTags])
 
-  const loadDetails = async (id: string) => {
+  const populateForm = useCallback((payload: TemplateDetails) => {
+    setName(payload.name ?? '')
+    setDescription(payload.description ?? '')
+    setUsageContext(payload.usage_context ?? '')
+    setFavorite(payload.favorite ?? false)
+    setArchived(payload.archived ?? false)
+    setTags((payload.tags ?? []).join(', '))
+    setVariablesText(JSON.stringify(payload.variables ?? [], null, 2))
+    setSampleDataText(JSON.stringify(payload.sample_data ?? {}, null, 2))
+    setPrintDefaultsText(JSON.stringify(payload.print_defaults ?? {}, null, 2))
+  }, [])
+
+  const loadDetails = useCallback(async (id: string) => {
+    const request = ++detailsRequest.current
     setStatus('loading')
     setError(null)
+    setDetails(null)
     try {
       const payload = (await getBackendSdk().templates.get(id)) as TemplateDetails
+      if (request !== detailsRequest.current) return
       setDetails(payload)
-      setName(payload.name ?? '')
-      setTags((payload.tags ?? []).join(', '))
-      setVariablesText(JSON.stringify(payload.variables ?? [], null, 2))
-      setSampleDataText(JSON.stringify(payload.sample_data ?? {}, null, 2))
+      if (id === backendTemplateId) populateForm(payload)
       setStatus('idle')
     } catch (e: any) {
+      if (request !== detailsRequest.current) return
       setStatus('error')
       setError(String(e?.message ?? e))
     }
-  }
+  }, [backendTemplateId, populateForm])
 
   const handleLoadIntoEditor = () => {
-    if (!details) return
+    if (!details || details.id !== selectedId || status === 'loading' || status === 'saving') return
     loadTemplate(details.template as any)
     setBackendTemplateId(details.id)
+    Object.entries(details.sample_data ?? {}).forEach(([name, value]) => setVariableValue(name, String(value ?? '')))
+    populateForm(details)
     if (details.preview_target) {
       setPreviewTarget({
         width_mm: Number(details.preview_target.width_mm),
@@ -152,8 +184,11 @@ export default function TemplateStoreDialog(props: Props) {
   }
 
   const handleSave = async (mode: 'create' | 'update') => {
+    if (status === 'loading' || status === 'saving') return
+    if (mode === 'update' && (!backendTemplateId || selectedId !== backendTemplateId || details?.id !== backendTemplateId)) return
     setStatus('saving')
     setError(null)
+    setSaveNotice(null)
     const varsRes = parseJson(variablesText, [])
     if (!varsRes.ok) {
       setStatus('error')
@@ -184,13 +219,30 @@ export default function TemplateStoreDialog(props: Props) {
         sampleDataObj[name] = variableValues[name] ?? ''
       }
     })
+    const missingExamples = requiredVariables.filter((name) => !String(sampleDataObj[name] ?? '').trim())
+    if (missingExamples.length) {
+      setStatus('error')
+      setError(`Enter preview examples for: ${missingExamples.join(', ')}`)
+      return
+    }
+    const printDefaultsRes = parseJson(printDefaultsText, {})
+    if (!printDefaultsRes.ok || !printDefaultsRes.value || typeof printDefaultsRes.value !== 'object' || Array.isArray(printDefaultsRes.value)) {
+      setStatus('error')
+      setError(printDefaultsRes.ok ? 'Print defaults must be a JSON object.' : `Print defaults JSON error: ${printDefaultsRes.error}`)
+      return
+    }
     try {
       const body = {
         name: name || doc.name || 'Untitled',
+        description,
+        usage_context: usageContext,
+        favorite,
+        archived,
         tags: parseTags(tags),
         variables: resolvedVariables,
         template: doc,
         sample_data: sampleDataObj,
+        print_defaults: printDefaultsRes.value as Record<string, unknown>,
         preview_target: previewTarget
       }
       const payload =
@@ -198,8 +250,15 @@ export default function TemplateStoreDialog(props: Props) {
           ? await getBackendSdk().templates.update(backendTemplateId, body)
           : await getBackendSdk().templates.create(body)
       if (payload?.id) setBackendTemplateId(payload.id)
+      if (payload?.id) {
+        setSelectedId(payload.id)
+        setDetails(payload as TemplateDetails)
+        populateForm(payload as TemplateDetails)
+      }
       await refreshList()
       setStatus('idle')
+      const warning = (payload as TemplateDetails & { preview_warning?: string | null }).preview_warning
+      setSaveNotice(warning ? `Template saved. Thumbnail unavailable: ${warning}` : 'Template saved.')
     } catch (e: any) {
       setStatus('error')
       setError(String(e?.message ?? e))
@@ -208,12 +267,12 @@ export default function TemplateStoreDialog(props: Props) {
 
   useEffect(() => {
     refreshList()
-  }, [filterTags])
+  }, [refreshList])
 
   useEffect(() => {
-    if (!selectedId) return
+    if (!selectedId) { detailsRequest.current += 1; setDetails(null); return }
     loadDetails(selectedId)
-  }, [selectedId])
+  }, [loadDetails, selectedId])
 
   useEffect(() => {
     if (!details?.id) {
@@ -243,6 +302,7 @@ export default function TemplateStoreDialog(props: Props) {
       .templates.getPreview(details.id)
       .then((blob) => {
         const url = URL.createObjectURL(blob)
+        if (controller.signal.aborted) { URL.revokeObjectURL(url); return }
         setPreviewUrl((prev) => {
           if (prev) URL.revokeObjectURL(prev)
           return url
@@ -264,12 +324,17 @@ export default function TemplateStoreDialog(props: Props) {
   }, [previewUrl])
 
   useEffect(() => {
-    if (!details) {
+    if (!details && !backendTemplateId) {
       setName(doc.name ?? '')
       const embeddedTags = embeddedMetadata.tags
       if (Array.isArray(embeddedTags)) setTags(embeddedTags.map(String).join(', '))
+      if (typeof embeddedMetadata.description === 'string') setDescription(embeddedMetadata.description)
+      if (typeof embeddedMetadata.usage_context === 'string') setUsageContext(embeddedMetadata.usage_context)
+      if (embeddedMetadata.print_defaults && typeof embeddedMetadata.print_defaults === 'object' && !Array.isArray(embeddedMetadata.print_defaults)) {
+        setPrintDefaultsText(JSON.stringify(embeddedMetadata.print_defaults, null, 2))
+      }
     }
-  }, [details, doc.name, embeddedMetadata.tags])
+  }, [backendTemplateId, details, doc.name, embeddedMetadata])
 
   useEffect(() => {
     if (variablesTouched) return
@@ -287,9 +352,21 @@ export default function TemplateStoreDialog(props: Props) {
     setSampleDataText(JSON.stringify(defaultSampleData, null, 2))
   }, [defaultSampleData, sampleDataText, sampleDataTouched])
 
+  const parsedVariables = parseJson(variablesText, [])
+  const parsedSamples = parseJson<Record<string, unknown>>(sampleDataText, {})
+  const parsedDefaults = parseJson<Record<string, unknown>>(printDefaultsText, {})
+  const sampleValues = parsedSamples.ok && parsedSamples.value && !Array.isArray(parsedSamples.value) ? parsedSamples.value : {}
+  const defaultValues = parsedDefaults.ok && parsedDefaults.value && !Array.isArray(parsedDefaults.value) ? parsedDefaults.value : {}
+  const valueFields = Array.from(new Set([
+    ...requiredVariables,
+    ...(parsedVariables.ok ? normalizeVariableDefs(parsedVariables.value).map((item) => item.name) : []),
+    ...Object.keys(sampleValues),
+    ...Object.keys(defaultValues),
+  ]))
+
   return (
     <div className='fixed inset-0 bg-black/70 flex items-center justify-center p-6'>
-      <div className='w-full max-w-5xl rounded border panel overflow-hidden'>
+      <div className='w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded border panel' role='dialog' aria-modal='true' aria-label='Template Store'>
         <div className='px-3 py-2 border-b app-bar flex items-center justify-between'>
           <div className='text-sm font-semibold'>Template Store</div>
           <button className='px-2 py-1 text-sm rounded border btn' onClick={props.onClose} type='button'>
@@ -337,7 +414,8 @@ export default function TemplateStoreDialog(props: Props) {
           </div>
 
           <div className='space-y-3'>
-            <div className='text-xs text-muted'>Current template</div>
+              <div className='text-xs text-muted'>Current editor template</div>
+              {selectedId && selectedId !== backendTemplateId && <div className='text-xs text-muted'>A different library template is selected. Use “Load Selected” before updating it.</div>}
             <div className='grid grid-cols-[120px_minmax(0,1fr)] gap-2 text-xs items-center'>
               <div className='text-muted'>Backend ID</div>
               <div>{backendTemplateId ?? 'not linked'}</div>
@@ -353,39 +431,46 @@ export default function TemplateStoreDialog(props: Props) {
                 value={tags}
                 onChange={(e) => setTags(e.target.value)}
               />
+              <div className='text-muted'>Description</div>
+              <textarea className='border rounded px-2 py-1 text-xs bg-[var(--panel-muted)] border-[var(--border)]' rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} placeholder='What is this label for?' />
+              <div className='text-muted'>Usage context</div>
+              <textarea className='border rounded px-2 py-1 text-xs bg-[var(--panel-muted)] border-[var(--border)]' rows={3} maxLength={4000} value={usageContext} onChange={(e) => setUsageContext(e.target.value)} placeholder='Where, when and with which data should it be used?' />
+              <div className='text-muted'>Library</div>
+              <div className='flex gap-4'><label><input type='checkbox' checked={favorite} onChange={(e) => setFavorite(e.target.checked)} /> Favorite</label><label><input type='checkbox' checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Archived</label></div>
               <div className='text-muted'>Preview</div>
               <div>
                 {previewTarget.width_mm} x {previewTarget.height_mm} mm @ {previewTarget.dpi} dpi
               </div>
             </div>
 
-            <div className='grid grid-cols-2 gap-3'>
-              <div>
-                <div className='text-xs text-muted mb-1'>Variables (JSON)</div>
-                <textarea
-                  className='w-full h-[140px] border rounded p-2 text-xs font-mono bg-[var(--panel-muted)] border-[var(--border)]'
-                  value={variablesText}
-                  onChange={(e) => {
-                    setVariablesTouched(true)
-                    setVariablesText(e.target.value)
-                  }}
-                />
+            <div className='space-y-2 text-xs'>
+              <div className='font-semibold'>Values by field</div>
+              <p className='text-muted'>Preview examples appear in saved thumbnails. Print start values fill the print form; leave them blank to start empty.</p>
+              {valueFields.length === 0 && <p className='text-muted'>Add a variable to the layout to enter values here.</p>}
+              <div className='template-value-grid'>
+                {valueFields.map((field) => <div className='template-value-row' key={field}>
+                  <code>{field}</code>
+                  <label><span>Preview example</span><input value={String(sampleValues[field] ?? '')} onChange={(e) => {
+                    const next = updateJsonField(sampleDataText, field, e.target.value, false)
+                    if (next !== null) { setSampleDataTouched(true); setSampleDataText(next) }
+                  }} /></label>
+                  <label><span>Print start value</span><input value={String(defaultValues[field] ?? '')} onChange={(e) => {
+                    const next = updateJsonField(printDefaultsText, field, e.target.value, true)
+                    if (next !== null) setPrintDefaultsText(next)
+                  }} placeholder='Empty' /></label>
+                </div>)}
               </div>
-              <div>
-                <div className='text-xs text-muted mb-1'>Sample data (JSON)</div>
-                <textarea
-                  className='w-full h-[140px] border rounded p-2 text-xs font-mono bg-[var(--panel-muted)] border-[var(--border)]'
-                  value={sampleDataText}
-                  onChange={(e) => {
-                    setSampleDataTouched(true)
-                    setSampleDataText(e.target.value)
-                  }}
-                />
-              </div>
+              <details><summary>Advanced JSON and variable definitions</summary>
+                <div className='grid grid-cols-3 gap-3 mt-2'>
+                  <label>Variables (JSON)<textarea className='w-full h-[140px] border rounded p-2 text-xs font-mono bg-[var(--panel-muted)] border-[var(--border)]' value={variablesText} onChange={(e) => { setVariablesTouched(true); setVariablesText(e.target.value) }} /></label>
+                  <label>Preview examples (JSON)<textarea className='w-full h-[140px] border rounded p-2 text-xs font-mono bg-[var(--panel-muted)] border-[var(--border)]' value={sampleDataText} onChange={(e) => { setSampleDataTouched(true); setSampleDataText(e.target.value) }} /></label>
+                  <label>Print start values (JSON)<textarea className='w-full h-[140px] border rounded p-2 text-xs font-mono bg-[var(--panel-muted)] border-[var(--border)]' value={printDefaultsText} onChange={(e) => setPrintDefaultsText(e.target.value)} /></label>
+                </div>
+              </details>
             </div>
 
             <div className='space-y-2'>
-              <div className='text-xs text-muted'>Preview</div>
+              <div className='text-xs text-muted'>Selected library preview</div>
               {previewStatus === 'loading' && <div className='text-xs text-muted'>Loading preview...</div>}
               {previewStatus === 'error' && <div className='text-xs text-danger'>Preview failed: {previewError}</div>}
               {previewStatus === 'idle' && previewUrl && (
@@ -395,14 +480,14 @@ export default function TemplateStoreDialog(props: Props) {
             </div>
 
             <div className='flex items-center gap-2'>
-              <button className='px-2 py-1 text-xs rounded border btn' onClick={() => handleSave('create')} type='button'>
+              <button className='px-2 py-1 text-xs rounded border btn' onClick={() => handleSave('create')} type='button' disabled={status === 'loading' || status === 'saving'}>
                 Save New
               </button>
               <button
                 className='px-2 py-1 text-xs rounded border btn'
                 onClick={() => handleSave('update')}
                 type='button'
-                disabled={!backendTemplateId}
+                disabled={!backendTemplateId || selectedId !== backendTemplateId || details?.id !== backendTemplateId || status === 'loading' || status === 'saving'}
               >
                 Update
               </button>
@@ -410,13 +495,14 @@ export default function TemplateStoreDialog(props: Props) {
                 className='px-2 py-1 text-xs rounded border btn'
                 onClick={handleLoadIntoEditor}
                 type='button'
-                disabled={!details}
+                disabled={!details || details.id !== selectedId || status === 'loading' || status === 'saving'}
               >
                 Load Selected
               </button>
               {status === 'loading' && <span className='text-xs text-muted'>Loading...</span>}
               {status === 'saving' && <span className='text-xs text-muted'>Saving...</span>}
               {status === 'error' && <span className='text-xs text-danger'>Error: {error}</span>}
+              {saveNotice && <span className='text-xs' role='status'>{saveNotice}</span>}
             </div>
           </div>
         </div>
