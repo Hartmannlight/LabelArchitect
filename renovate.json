@@ -3,6 +3,13 @@
   "extends": [
     "github>Hartmannlight/pipeline-toolkit"
   ],
+  "packageRules": [
+    {
+      "description": "Keep TypeScript within typescript-eslint's supported compiler versions",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<6.1.0"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
