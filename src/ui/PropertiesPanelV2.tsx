@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { getNodeById } from '../model/ids'
-import type { DataMatrixElement, Element, ImageBackground, ImageElement, LeafNode, QrElement, SplitNode, TemplateDefaults, TextElement } from '../model/types'
+import type { DataMatrixElement, Element, ImageBackground, ImageElement, LeafNode, Node, QrElement, SplitNode, TemplateDefaults, TextElement } from '../model/types'
 import { useTemplateEditorStore } from '../state/store'
 import { PROJECT_ELEMENT_DEFAULTS } from '../config/projectDefaults'
 import VariablesPanel from './VariablesPanelV2'
+import CableFlagControls from './CableFlagControls'
+import LabelSetPanel from './LabelSetPanel'
+import { cableFlagConfig } from '../model/cableFlag'
 
 type Option = { value: string; label: string }
 const elementTypes: Array<{ value: Element['type']; label: string; shortcut: string }> = [
@@ -56,12 +59,19 @@ export default function PropertiesPanelV2() {
   const node = useMemo(() => selection ? getNodeById(doc.layout, selection.nodeId) : null, [doc.layout, selection])
   const setAlias = useTemplateEditorStore((state) => state.setAlias)
   const clearAlias = useTemplateEditorStore((state) => state.clearAlias)
+  const setRotation = useTemplateEditorStore((state) => state.setNodeRotation)
+  const cableConfig = cableFlagConfig(doc)
+  const preview = useTemplateEditorStore((state) => state.preview)
+  const setCableConfig = useTemplateEditorStore((state) => state.setCableFlagConfig)
   return <div className='properties-panel'><header className='properties-header'><div><span>Inspector</span><h2>{node?.kind === 'split' ? 'Layout split' : node?.kind === 'leaf' ? elementTypes.find((entry) => entry.value === node.elements[0].type)?.label : 'Properties'}</h2></div>{selection && <code>{selection.nodeId}</code>}</header><div className='properties-scroll'>
     {!selection || !node ? <div className='properties-empty'><strong>Select something on the label</strong><span>Its most important settings will appear here.</span></div> : <>
       <Card title={node.kind === 'split' ? 'Identify this split' : 'Identify this element'}><NameField value={node.alias ?? ''} nodeKind={node.kind} onChange={(value) => setAlias(selection.nodeId, value)} onClear={() => clearAlias(selection.nodeId)} /></Card>
+      <Card title='Area rotation' description='Rotate the content and all child areas within this space.'><Field label='Rotation' wide><Select value={String(node.rotation_deg === 270 ? -90 : node.rotation_deg ?? 0)} options={[{ value: '0', label: '0°' }, { value: '90', label: '+90° clockwise' }, { value: '-90', label: '−90° counterclockwise' }, { value: '180', label: '180° upside down' }]} onChange={(value) => setRotation(selection.nodeId, Number(value) as Node['rotation_deg'])} /></Field></Card>
       <NodeBackgroundProperties nodeId={selection.nodeId} background={node.background} defaults={doc.defaults?.image ?? {}} />
       {node.kind === 'split' ? <SplitProperties nodeId={selection.nodeId} node={node} /> : <ElementProperties nodeId={selection.nodeId} node={node} defaults={doc.defaults ?? {}} />}
     </>}
+    {cableConfig && <CableFlagControls config={cableConfig} target={preview} onChange={setCableConfig} />}
+    <LabelSetPanel />
     <VariablesPanel />
   </div></div>
 }
@@ -111,8 +121,8 @@ function TextProperties(props: { element: TextElement; defaults: NonNullable<Tem
       <div className='property-grid'>
         <Field label='Font height (mm)'><NumInput value={props.element.font_height_mm ?? props.defaults.font_height_mm ?? 4} min={0.5} onChange={(value) => props.patch({ font_height_mm: value })} /></Field>
         <Field label={fit === 'wrap' ? 'Warn above lines' : 'Maximum lines'} hint={fit === 'wrap' ? 'Wrap keeps every line and warns when this target is exceeded.' : fit === 'overflow' ? 'Not used while overflow is selected.' : 'Truncate cuts here; shrink-to-fit reduces the font until the text fits.'}><NumInput value={props.element.max_lines ?? props.defaults.max_lines ?? 2} min={1} step={1} onChange={(value) => props.patch({ max_lines: Math.floor(value) })} /></Field>
-        <Field label='When text is too large'><Select value={fit} options={fitOptions} onChange={(value) => props.patch(value === 'overflow' ? { fit: 'overflow', wrap: 'none' } : { fit: value as TextElement['fit'], wrap: props.element.wrap === 'none' ? 'word' : props.element.wrap })} /></Field>
-        <Field label='Wrap at'><Select value={props.element.wrap ?? props.defaults.wrap ?? 'word'} options={wrapOptions} onChange={(value) => props.patch(value === 'none' ? { wrap: 'none', fit: 'overflow' } : { wrap: value as TextElement['wrap'], fit: fit === 'overflow' ? 'wrap' : fit })} /></Field>
+        <Field label='When text is too large'><Select value={fit} options={fitOptions} onChange={(value) => props.patch(value === 'overflow' ? { fit: 'overflow', wrap: 'none' } : { fit: value as TextElement['fit'], wrap: props.element.wrap === 'none' && value !== 'shrink_to_fit' ? 'word' : props.element.wrap })} /></Field>
+        <Field label='Wrap at'><Select value={props.element.wrap ?? props.defaults.wrap ?? 'word'} options={wrapOptions} onChange={(value) => props.patch(value === 'none' ? { wrap: 'none', fit: fit === 'shrink_to_fit' ? fit : 'overflow' } : { wrap: value as TextElement['wrap'], fit: fit === 'overflow' ? 'wrap' : fit })} /></Field>
       </div>
     </Card>
     <Advanced title='Fine typography and bounds' description='Character width, inner padding and size constraints'>

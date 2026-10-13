@@ -1,7 +1,9 @@
 import { type MouseEvent, type SyntheticEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { getRenderSdk } from '../api/sdk'
 import { backendBase, buildApiUrl } from '../api/config'
+import { templateLabels, labelPreviewTemplate } from '../model/labelSet'
 import { computeLayout } from '../model/layout'
+import { cableFlagPreviewLayout } from '../model/cableFlag'
 import { extractTemplateVariables } from '../model/variables'
 import { useTemplateEditorStore } from '../state/store'
 
@@ -19,6 +21,9 @@ export default function LabelPreviewPanel() {
   const selectNode = useTemplateEditorStore((s) => s.selectNode)
   const settings = useTemplateEditorStore((s) => s.settings)
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
+  const [labelIndex, setLabelIndex] = useState(0)
+  const labels = templateLabels(doc)
+  const displayDoc = useMemo(() => labelPreviewTemplate(doc, labelIndex), [doc, labelIndex])
   const [status, setStatus] = useState<RenderStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [diagnostics, setDiagnostics] = useState<string[]>([])
@@ -61,7 +66,7 @@ export default function LabelPreviewPanel() {
       setDiagnostics([])
       try {
         const rendered = await getRenderSdk().renders.renderPngDetailed({
-          template: doc,
+          template: displayDoc,
           target: {
             width_mm: preview.width_mm,
             height_mm: preview.height_mm,
@@ -99,7 +104,7 @@ export default function LabelPreviewPanel() {
       clearTimeout(timeout)
       controller.abort()
     }
-  }, [doc, preview.width_mm, preview.height_mm, preview.dpi, renderVariables, liveEnabled])
+  }, [displayDoc, preview.width_mm, preview.height_mm, preview.dpi, renderVariables, liveEnabled])
 
   useEffect(() => {
     return () => {
@@ -121,7 +126,7 @@ export default function LabelPreviewPanel() {
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) return
 
     const scalePxPerMm = rect.width / preview.width_mm
-    const layout = computeLayout(doc.layout, preview.width_mm, preview.height_mm, { scalePxPerMm })
+    const layout = computeLayout(cableFlagPreviewLayout(displayDoc, preview), preview.width_mm, preview.height_mm, { scalePxPerMm, leafPaddingMm: doc.defaults?.leaf_padding_mm })
     const inRect = (rx: number, ry: number, r: { x: number; y: number; w: number; h: number }) =>
       rx >= r.x && ry >= r.y && rx <= r.x + r.w && ry <= r.y + r.h
     const hit =
@@ -139,6 +144,7 @@ export default function LabelPreviewPanel() {
 
   return (
     <div className='h-full min-h-0 flex flex-col'>
+      {labels.length > 1 && <label className='field'><span>Label to preview</span><select value={Math.min(labelIndex, labels.length - 1)} onChange={(event) => setLabelIndex(Number(event.target.value))}>{labels.map((label, index) => <option key={index} value={index}>{label.name ?? `Label ${index + 1}`}</option>)}</select></label>}
       <div className='px-2 py-1 text-xs border-b border-[var(--border)] flex items-center justify-between'>
         <div className='flex items-center gap-2'>
           <span className='text-muted'>Zoom</span>

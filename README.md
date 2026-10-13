@@ -100,7 +100,9 @@ Die zentralen Typen stehen in `src/model/types.ts`, validiert in `src/model/sche
 - Elemente:
   - `text`, `qr`, `datamatrix`, `image`, `line`
   - Einheiten sind mm.
-  - Keine Rotation in v1.
+  - `rotation_deg`: 0, 90, 180 oder -90 (270 wird ebenfalls akzeptiert).
+    Dreht den Inhalt eines Leaf oder Split samt Unterteilungen innerhalb seines
+    Bereichs. Bei Vierteldrehungen werden die lokalen Breiten und Höhen getauscht.
 
 Die Layout-Berechnung fuer Canvas/Preview laeuft ueber `computeLayout(...)` in `src/model/layout.ts`.
 
@@ -183,7 +185,54 @@ Optional:
 
 - Jedes Leaf hat genau ein Element.
 - Einheiten fuer padding/thickness/gutter: mm.
-- Keine Rotation.
+- Rotation gilt für ganze Bereiche; Padding und Textausrichtung beziehen sich
+  auf die gedrehten lokalen Achsen.
+
+## Kabel-Fähnchen
+
+In der Bibliothek erzeugt **Cable flag 75 × 50** eine editierbare Vorlage.
+PrintHub liefert außerdem `kabel-faehnchen-75x50` als gebündelte Vorlage mit.
+Die 50-mm-Kante liegt entlang des Kabels; die Faltung läuft über die 75 mm.
+Zwei Seiten mit +90° und -90° enthalten jeweils alle Von-/Zu-Angaben.
+
+**Cable diameter** reserviert den vollen Umfang `π × Durchmesser` als
+unbedruckten Mittelstreifen. **Text to cable padding** ist der zusätzliche
+Textabstand auf jeder Seite. Die äußere Kante hat 1,5 mm Rand. Bei 6 mm
+Durchmesser und 2 mm Textabstand bleiben pro Seite etwa 28,1 mm Fähnchenlänge
+und 24,6 mm für den Text. Die Werte lassen sich im Designer speichern oder
+für einen einzelnen Druck in Quick print ändern.
+
+Die zwei Freitextfelder `from` (Von) und `to` (Zu) beschreiben die Anschlüsse.
+Als Kurzform eignen sich `SW321 [32]` und `#543 [1]`. Manuelle Zeilenumbrüche
+bleiben erhalten; es gibt keine automatischen Umbrüche. Zentrierter Text wird
+mit **shrink to fit** passend verkleinert. Eine dünne Mittellinie hilft beim
+Anlegen des Labels am Kabel.
+
+Quick print füllt die Felder einmal aus und sendet beide Kabelenden mit einem
+Klick als einen Auftrag. Das Partnerlabel vertauscht `from` und `to` automatisch.
+
+Vorlagen können allgemein eine optionale `labels`-Liste enthalten. **Labels per
+print** im Designer verwaltet Reihenfolge, Namen und Feldzuordnungen. Ohne die
+Liste wird wie bisher ein Label gedruckt. Jedes Label nutzt das gemeinsame
+`layout`, oder ein eigenes `layout`, das per JSON importiert werden kann.
+`bindings` ordnet Platzhalter den gemeinsam ausgefüllten Eingabefeldern zu;
+die Zuordnungen werden gleichzeitig angewendet. Ein Beispiel für zwei Labels:
+
+```json
+"labels": [
+  { "name": "Ende A" },
+  { "name": "Ende B", "bindings": { "from": "to", "to": "from" } }
+]
+```
+
+Ein Druckauftrag enthält alle Labels in Listenreihenfolge. Native ZPL-Drucke
+enthalten mehrere Formate; Rasterdrucke enthalten ein Bild pro Label. Die
+Vorschau zeigt alle Labels, bevor der gemeinsame Druck ausgelöst wird.
+
+Die Geometrie liegt in `extensions.cable_flag` (`diameter_mm`,
+`text_padding_mm`, `wrap_axis: "long"`). PrintHub berechnet Umfang und Bereiche
+für die tatsächliche Zielgröße auch bei direktem API-Druck neu. Zu wenig Platz
+führt zu einem Fehler statt zu überlappendem Kabeltext.
 
 ## Einstiegspunkte fuer Erweiterungen
 

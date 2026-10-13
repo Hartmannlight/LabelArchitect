@@ -1,115 +1,62 @@
-import type { Element, ImageBackground, LeafNode, Node, SplitNode } from './types'
+import type { Element, ImageBackground, LeafNode, Node, RotationDeg, SplitNode } from './types'
 
 export type RectPx = { x: number; y: number; w: number; h: number }
-
-export type LeafRender = {
-  nodeId: string
-  alias?: string
-  node: LeafNode
-  rect: RectPx
-  contentRect: RectPx
-  element: Element
+export type Transform = { a: number; b: number; c: number; d: number; x: number; y: number }
+export const identity: Transform = { a: 1, b: 0, c: 0, d: 1, x: 0, y: 0 }
+export const transformPoint = (t: Transform, x: number, y: number) => ({ x: t.a * x + t.c * y + t.x, y: t.b * x + t.d * y + t.y })
+export const rotationOf = (t: Transform): RotationDeg => t.a === 1 ? 0 : t.b === 1 ? 90 : t.a === -1 ? 180 : -90
+export function transformRect(t: Transform, r: RectPx): RectPx {
+  const points = [transformPoint(t, r.x, r.y), transformPoint(t, r.x + r.w, r.y), transformPoint(t, r.x, r.y + r.h), transformPoint(t, r.x + r.w, r.y + r.h)]
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y)
+  return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) }
 }
-
-export type SplitRender = {
-  nodeId: string
-  alias?: string
-  node: SplitNode
-  rect: RectPx
-  gutterRect: RectPx
-  dividerRect?: RectPx
+function childTransform(parent: Transform, r: RectPx, angle: number): { transform: Transform; rect: RectPx } {
+  const turn = ((angle % 360) + 360) % 360 / 90
+  const [a, b, c, d, x, y] = [[1, 0, 0, 1, r.x, r.y], [0, 1, -1, 0, r.x + r.w, r.y], [-1, 0, 0, -1, r.x + r.w, r.y + r.h], [0, -1, 1, 0, r.x, r.y + r.h]][turn]
+  const origin = transformPoint(parent, x, y)
+  return { transform: { a: parent.a*a + parent.c*b, b: parent.b*a + parent.d*b, c: parent.a*c + parent.c*d, d: parent.b*c + parent.d*d, ...origin }, rect: { x: 0, y: 0, w: turn % 2 ? r.h : r.w, h: turn % 2 ? r.w : r.h } }
 }
-
-export type BackgroundRender = {
-  nodeId: string
-  background: ImageBackground
-  rect: RectPx
-}
-
-export type LayoutRender = {
-  rootRect: RectPx
-  backgrounds: BackgroundRender[]
-  leaves: LeafRender[]
-  splits: SplitRender[]
-  aliasToId: Record<string, string>
-}
-
-export type LayoutOptions = {
-  scalePxPerMm: number
-}
+export type LeafRender = { nodeId: string; alias?: string; node: LeafNode; rect: RectPx; contentRect: RectPx; localContentRect: RectPx; transform: Transform; element: Element }
+export type SplitRender = { nodeId: string; alias?: string; node: SplitNode; rect: RectPx; gutterRect: RectPx; dividerRect?: RectPx; direction: 'v' | 'h'; reversed: boolean }
+export type BackgroundRender = { nodeId: string; background: ImageBackground; rect: RectPx }
+export type LayoutRender = { rootRect: RectPx; backgrounds: BackgroundRender[]; leaves: LeafRender[]; splits: SplitRender[]; aliasToId: Record<string, string> }
+export type LayoutOptions = { scalePxPerMm: number; leafPaddingMm?: [number, number, number, number] }
 
 export function computeLayout(root: Node, widthMm: number, heightMm: number, opts: LayoutOptions): LayoutRender {
   const scale = opts.scalePxPerMm
   const rootRect: RectPx = { x: 0, y: 0, w: widthMm * scale, h: heightMm * scale }
-  const backgrounds: BackgroundRender[] = []
-  const leaves: LeafRender[] = []
-  const splits: SplitRender[] = []
+  const backgrounds: BackgroundRender[] = [], leaves: LeafRender[] = [], splits: SplitRender[] = []
   const aliasToId: Record<string, string> = {}
-
-  const inset = (r: RectPx, left: number, top: number, right: number, bottom: number): RectPx => ({
-    x: r.x + left,
-    y: r.y + top,
-    w: Math.max(0, r.w - left - right),
-    h: Math.max(0, r.h - top - bottom)
-  })
-
-  const walk = (node: Node, nodeId: string, rect: RectPx) => {
-    const alias = (node as any).alias as string | undefined
-    if (alias) aliasToId[alias] = nodeId
-    if (node.background) backgrounds.push({ nodeId, background: node.background, rect })
-
+  const inset = (r: RectPx, p: number[]): RectPx => ({ x: r.x + p[3] * scale, y: r.y + p[0] * scale, w: Math.max(0, r.w - (p[3] + p[1]) * scale), h: Math.max(0, r.h - (p[0] + p[2]) * scale) })
+  const walk = (node: Node, nodeId: string, allocated: RectPx, parent: Transform) => {
+    const { transform, rect } = childTransform(parent, allocated, node.rotation_deg ?? 0)
+    const world = transformRect(transform, rect)
+    if (node.alias) aliasToId[node.alias] = nodeId
+    if (node.background) backgrounds.push({ nodeId, background: node.background, rect: world })
     if (node.kind === 'leaf') {
-      const pad = node.padding_mm ?? [0, 0, 0, 0]
-      const contentRect = inset(rect, pad[3] * scale, pad[0] * scale, pad[1] * scale, pad[2] * scale)
       const element = node.elements[0]
-      const ep = element.padding_mm ?? [0, 0, 0, 0]
-      const elementRect = inset(contentRect, ep[3] * scale, ep[0] * scale, ep[1] * scale, ep[2] * scale)
-      leaves.push({ nodeId, alias, node, rect, contentRect: elementRect, element })
+      const localContentRect = inset(inset(rect, node.padding_mm ?? opts.leafPaddingMm ?? [0, 0, 0, 0]), element.padding_mm ?? [0, 0, 0, 0])
+      leaves.push({ nodeId, alias: node.alias, node, rect: world, contentRect: transformRect(transform, localContentRect), localContentRect, transform, element })
       return
     }
-
-    const gutterMm = node.gutter_mm ?? 0
-    const gutter = gutterMm * scale
-    if (node.direction === 'v') {
-      const available = Math.max(0, rect.w - gutter)
-      const child0w = Math.floor(available * node.ratio)
-      const child1w = available - child0w
-      const child0: RectPx = { x: rect.x, y: rect.y, w: child0w, h: rect.h }
-      const gutterRect: RectPx = { x: rect.x + child0w, y: rect.y, w: gutter, h: rect.h }
-      const child1: RectPx = { x: rect.x + child0w + gutter, y: rect.y, w: child1w, h: rect.h }
-
-      const divider = node.divider
-      let dividerRect: RectPx | undefined
-      if (divider?.visible) {
-        const t = Math.max(1, (divider.thickness_mm ?? 0.3) * scale)
-        dividerRect = { x: gutterRect.x + (gutterRect.w - t) / 2, y: rect.y, w: t, h: rect.h }
-      }
-
-      splits.push({ nodeId, alias, node, rect, gutterRect, dividerRect })
-      walk(node.children[0], `${nodeId}/0`, child0)
-      walk(node.children[1], `${nodeId}/1`, child1)
-      return
-    }
-
-    const available = Math.max(0, rect.h - gutter)
-    const child0h = Math.floor(available * node.ratio)
-    const child1h = available - child0h
-    const child0: RectPx = { x: rect.x, y: rect.y, w: rect.w, h: child0h }
-    const gutterRect: RectPx = { x: rect.x, y: rect.y + child0h, w: rect.w, h: gutter }
-    const child1: RectPx = { x: rect.x, y: rect.y + child0h + gutter, w: rect.w, h: child1h }
-
-    const divider = node.divider
+    const gutter = (node.gutter_mm ?? 0) * scale, vertical = node.direction === 'v'
+    const available = Math.max(0, (vertical ? rect.w : rect.h) - gutter)
+    const first = Math.floor(available * node.ratio), second = available - first
+    const children: [RectPx, RectPx] = vertical
+      ? [{ x: 0, y: 0, w: first, h: rect.h }, { x: first + gutter, y: 0, w: second, h: rect.h }]
+      : [{ x: 0, y: 0, w: rect.w, h: first }, { x: 0, y: first + gutter, w: rect.w, h: second }]
+    const gap = vertical ? { x: first, y: 0, w: gutter, h: rect.h } : { x: 0, y: first, w: rect.w, h: gutter }
+    const axis = vertical ? { x: transform.a, y: transform.b } : { x: transform.c, y: transform.d }
+    const direction = axis.x ? 'v' : 'h'
     let dividerRect: RectPx | undefined
-    if (divider?.visible) {
-      const t = Math.max(1, (divider.thickness_mm ?? 0.3) * scale)
-      dividerRect = { x: rect.x, y: gutterRect.y + (gutterRect.h - t) / 2, w: rect.w, h: t }
+    if (node.divider?.visible) {
+      const thickness = Math.max(1, (node.divider.thickness_mm ?? 0.3) * scale)
+      dividerRect = transformRect(transform, vertical ? { x: first + (gutter - thickness) / 2, y: 0, w: thickness, h: rect.h } : { x: 0, y: first + (gutter - thickness) / 2, w: rect.w, h: thickness })
     }
-
-    splits.push({ nodeId, alias, node, rect, gutterRect, dividerRect })
-    walk(node.children[0], `${nodeId}/0`, child0)
-    walk(node.children[1], `${nodeId}/1`, child1)
+    splits.push({ nodeId, alias: node.alias, node, rect: world, gutterRect: transformRect(transform, gap), dividerRect, direction, reversed: (axis.x || axis.y) < 0 })
+    walk(node.children[0], `${nodeId}/0`, children[0], transform)
+    walk(node.children[1], `${nodeId}/1`, children[1], transform)
   }
-
-  walk(root, 'r', rootRect)
+  walk(root, 'r', rootRect, identity)
   return { rootRect, backgrounds, leaves, splits, aliasToId }
 }

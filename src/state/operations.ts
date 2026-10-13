@@ -4,6 +4,10 @@ import { PROJECT_ELEMENT_DEFAULTS } from '../config/projectDefaults'
 
 export type SplitDirection = 'v' | 'h'
 
+export function setNodeRotation(doc: TemplateDoc, nodeId: string, rotation_deg: Node['rotation_deg']): TemplateDoc {
+  return { ...doc, layout: updateNodeById(doc.layout, nodeId, (node) => ({ ...node, rotation_deg })) }
+}
+
 export function setTemplateName(doc: TemplateDoc, name: string): TemplateDoc {
   return { ...doc, name }
 }
@@ -54,7 +58,7 @@ export function splitLeaf(doc: TemplateDoc, nodeId: string, direction: SplitDire
   const target = getNodeById(doc.layout, nodeId)
   if (!target || !isLeaf(target)) return doc
 
-  const { background, ...leafWithoutBackground } = target
+  const { background, rotation_deg, ...leafWithoutBackground } = target
   const left: LeafNode = leafWithoutBackground
   const right: LeafNode = {
     kind: 'leaf',
@@ -66,6 +70,7 @@ export function splitLeaf(doc: TemplateDoc, nodeId: string, direction: SplitDire
   const split: SplitNode = {
     kind: 'split',
     background,
+    rotation_deg,
     direction,
     ratio: 0.5,
     gutter_mm: 0,
@@ -86,6 +91,7 @@ export function unsplit(doc: TemplateDoc, nodeId: string): TemplateDoc {
   const merged: LeafNode = {
     kind: 'leaf',
     background: target.background ?? firstLeaf.background,
+    rotation_deg: ((((target.rotation_deg ?? 0) + (firstLeaf.rotation_deg ?? 0)) % 360 + 360) % 360) as Node['rotation_deg'],
     padding_mm: firstLeaf.padding_mm,
     debug_border: firstLeaf.debug_border,
     elements: firstLeaf.elements
@@ -96,7 +102,8 @@ export function unsplit(doc: TemplateDoc, nodeId: string): TemplateDoc {
 
 function findFirstLeaf(node: Node): LeafNode | null {
   if (node.kind === 'leaf') return node
-  return findFirstLeaf(node.children[0]) ?? findFirstLeaf(node.children[1])
+  const leaf = findFirstLeaf(node.children[0]) ?? findFirstLeaf(node.children[1])
+  return leaf ? { ...leaf, rotation_deg: ((((node.rotation_deg ?? 0) + (leaf.rotation_deg ?? 0)) % 360 + 360) % 360) as Node['rotation_deg'] } : null
 }
 
 export function setLeafElement(doc: TemplateDoc, nodeId: string, element: Element): TemplateDoc {

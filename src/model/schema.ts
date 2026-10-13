@@ -116,6 +116,7 @@ const elementSchema = z.discriminatedUnion('type', [
 
 const leafSchemaRaw = z.object({
   kind: z.literal('leaf'),
+  rotation_deg: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(-90), z.literal(270)]).optional(),
   alias: z.string().min(1).optional(),
   background: imageBackgroundSchema.optional(),
   padding_mm: paddingMmSchema.optional(),
@@ -129,6 +130,7 @@ let nodeSchemaRaw: z.ZodTypeAny
 const splitSchemaRaw: z.ZodTypeAny = z.lazy(() =>
   z.object({
     kind: z.literal('split'),
+    rotation_deg: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(-90), z.literal(270)]).optional(),
     alias: z.string().min(1).optional(),
     background: imageBackgroundSchema.optional(),
     direction: z.enum(['v', 'h']),
@@ -164,17 +166,17 @@ const templateDefaultsSchema = z.object({
           path: ['wrap'],
         })
       }
-      if ((fit === 'wrap' || fit === 'truncate' || fit === 'shrink_to_fit') && wrap === 'none') {
+      if ((fit === 'wrap' || fit === 'truncate') && wrap === 'none') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'wrap must be word or char when fit is wrap, truncate, or shrink_to_fit',
+          message: 'wrap must be word or char when fit is wrap or truncate',
           path: ['wrap'],
         })
       }
-      if (wrap === 'none' && fit && fit !== 'overflow') {
+      if (wrap === 'none' && fit && fit !== 'overflow' && fit !== 'shrink_to_fit') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'fit must be overflow when wrap is none',
+          message: 'fit must be overflow or shrink_to_fit when wrap is none',
           path: ['fit'],
         })
       }
@@ -216,6 +218,11 @@ const templateSchema = z
     name: z.string().min(1).optional(),
     defaults: templateDefaultsSchema.optional(),
     layout: nodeSchemaRaw,
+    labels: z.array(z.object({
+      name: z.string().max(100).optional(),
+      layout: nodeSchemaRaw.optional(),
+      bindings: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)).optional(),
+    })).min(1).max(25).optional(),
     extensions: z.record(z.unknown()).optional(),
   })
   .superRefine((doc, ctx) => {
@@ -228,17 +235,17 @@ const templateSchema = z
           path: [...path, 'wrap'],
         })
       }
-      if ((fit === 'wrap' || fit === 'truncate' || fit === 'shrink_to_fit') && wrap === 'none') {
+      if ((fit === 'wrap' || fit === 'truncate') && wrap === 'none') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'wrap must be word or char when fit is wrap, truncate, or shrink_to_fit',
+          message: 'wrap must be word or char when fit is wrap or truncate',
           path: [...path, 'wrap'],
         })
       }
-      if (wrap === 'none' && fit && fit !== 'overflow') {
+      if (wrap === 'none' && fit && fit !== 'overflow' && fit !== 'shrink_to_fit') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'fit must be overflow when wrap is none',
+          message: 'fit must be overflow or shrink_to_fit when wrap is none',
           path: [...path, 'fit'],
         })
       }
@@ -300,6 +307,7 @@ const templateSchema = z
       validateFitWrap(doc.defaults.text.fit, doc.defaults.text.wrap, ['defaults', 'text'])
     }
     walk(doc.layout, ['layout'])
+    doc.labels?.forEach((label, index) => { if (label.layout) { aliases.clear(); walk(label.layout, ['labels', index, 'layout']) } })
   })
 
 export function validateTemplate(

@@ -1,5 +1,5 @@
 import type { PrintJobResponse, TemplateDetailResponse, TemplateListItem } from '@printhub/sdk'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { backendBase, buildApiUrl, labelSizePresets } from '../api/config'
 import { getBackendSdk } from '../api/sdk'
 import { errorText } from '../api/errorText'
@@ -14,6 +14,10 @@ import TreePanel from '../ui/TreePanel'
 import ValidationPanel from '../ui/ValidationPanel'
 import ToolbarPopover from '../ui/ToolbarPopover'
 import RasterDesigner from '../ui/RasterDesigner'
+import CableFlagControls from '../ui/CableFlagControls'
+import { cableFlagConfig, configureCableFlag, createCableFlagTemplate } from '../model/cableFlag'
+import { templateLabels, labelPreviewTemplate } from '../model/labelSet'
+import type { TemplateDoc } from '../model/types'
 
 type View = 'templates' | 'assistant' | 'print' | 'designer' | 'image-designer' | 'printers' | 'jobs'
 type Notice = { tone: 'success' | 'error' | 'info'; text: string } | null
@@ -170,7 +174,7 @@ function TemplateLibrary({ onNotice }: { onNotice: (notice: Notice) => void }) {
     } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) }
   }
   return <main className='page-shell'>
-    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Choose a template and print</h1><p>Favorites keep frequent labels close. Archive hides saved templates until needed.</p></div><button className='primary-action' type='button' onClick={() => { newTemplate(); navigate('designer') }}>New template</button></header>
+    <header className='page-heading'><div><span className='eyebrow'>Template library</span><h1>Choose a template and print</h1><p>Favorites keep frequent labels close. Archive hides saved templates until needed.</p></div><div className='quick-actions'><button type='button' onClick={() => { loadTemplate(createCableFlagTemplate()); setBackendTemplateId(null); setPreviewTarget({ width_mm: 75, height_mm: 50, dpi: 203 }); Object.entries({ from: 'SW321 [32]', to: '#543 [1]\nB11' }).forEach(([key, value]) => setVariableValue(key, value)); navigate('designer') }}>Cable flag 75 × 50</button><button className='primary-action' type='button' onClick={() => { newTemplate(); navigate('designer') }}>New template</button></div></header>
     <div className='library-toolbar'><label><span className='sr-only'>Search templates</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search name, description, context and tags' /></label><select aria-label='Template section' value={section} onChange={(event) => setSection(event.target.value as typeof section)}><option value='active'>Active</option><option value='favorites'>Favorites</option><option value='archived'>Archive</option><option value='all'>All</option></select><select aria-label='Sort templates' value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value='name'>Name</option><option value='recent'>Recently changed</option><option value='size'>Label size</option></select><button type='button' onClick={refresh}>Refresh</button><button type='button' onClick={() => void regeneratePreviews()} disabled={!previewSettings?.stored_enabled || filtered.length === 0}>Regenerate thumbnails</button></div>
     {previewSettings && !previewSettings.stored_enabled && <div className='notice notice-info' role='status'>Stored template previews are disabled. Set ZPLGRID_ENABLE_LABELARY_TEMPLATES=1 to generate thumbnails. Live preview can remain off.</div>}
     {loading && <div className='empty-state'>Loading templates…</div>}{error && <div className='empty-state error-state'>{error}</div>}
@@ -358,15 +362,16 @@ function OutputSizePicker({ mode, onMode, templateTarget, printerTarget, printer
 }
 
 function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
+  const actionBusy = useRef(false)
   const templates = useTemplates(); const printerData = usePrinters()
-  const [templateId, setTemplateId] = useState(() => sessionStorage.getItem('printhub:selectedTemplate') ?? '')
+  const [templateId, setTemplateId] = useState(() => new URLSearchParams(window.location.search).get('template_id') ?? sessionStorage.getItem('printhub:selectedTemplate') ?? '')
   const [template, setTemplate] = useState<TemplateDetailResponse | null>(null)
   const [printerId, setPrinterId] = useState(() => localStorage.getItem('printhub:printer') ?? '')
   const [sizeMode, setSizeMode] = useState<OutputSizeMode>('printer')
   const [outputMode, setOutputMode] = useState<'auto' | 'native' | 'raster'>('auto')
   const firstPreset = labelSizePresets[0] ?? { width_mm: 50, height_mm: 25 }
   const [customTarget, setCustomTarget] = useState<RenderTarget>({ width_mm: firstPreset.width_mm, height_mm: firstPreset.height_mm, dpi: 203, origin_x_mm: 0, origin_y_mm: 0 })
-  const [values, setValues] = useState<Record<string, string>>({}); const [previewUrl, setPreviewUrl] = useState<string | null>(null); const [busy, setBusy] = useState<'preview' | 'print' | null>(null); const [printWarnings, setPrintWarnings] = useState<string[]>([])
+  const [values, setValues] = useState<Record<string, string>>({}); const [previewUrls, setPreviewUrls] = useState<string[]>([]); const [busy, setBusy] = useState<'preview' | 'print' | null>(null); const [printWarnings, setPrintWarnings] = useState<string[]>([])
   const draftId = new URLSearchParams(window.location.search).get('draft_id')
   useEffect(() => {
     if (printerData.loading || printerData.error) return
@@ -392,8 +397,8 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
     if (!draftId) return
     getBackendSdk().drafts.get(draftId).then((draft) => { setTemplate({ id: `draft:${draftId}`, name: 'Print draft', template: draft.template, variables: Object.keys(draft.variables ?? {}).map((name) => ({ name, mode: 'required' })), sample_data: draft.variables, preview_target: draft.target, preview_available: false, tags: [] } as any); setValues(Object.fromEntries(Object.entries(draft.variables ?? {}).map(([key, value]) => [key, String(value ?? '')]))) }).catch((reason) => onNotice({ tone: 'error', text: errorText(reason) }))
   }, [draftId, onNotice])
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
-  useEffect(() => { setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return null }); setPrintWarnings([]) }, [customTarget.height_mm, customTarget.width_mm, outputMode, printerId, sizeMode, templateId])
+  useEffect(() => () => { previewUrls.forEach((url) => URL.revokeObjectURL(url)) }, [previewUrls])
+  useEffect(() => { setPreviewUrls((old) => { old.forEach((url) => URL.revokeObjectURL(url)); return [] }); setPrintWarnings([]) }, [customTarget.height_mm, customTarget.width_mm, outputMode, printerId, sizeMode, templateId, values, template])
   const selectedPrinter = printerData.printers.find((printer) => String(printer.id) === printerId)
   const acceptedFormats = new Set(((selectedPrinter as any)?.accepted_mime_types ?? []).map(String))
   const supportsNative = acceptedFormats.has('application/zpl')
@@ -408,19 +413,59 @@ function QuickPrint({ onNotice }: { onNotice: (notice: Notice) => void }) {
   }, [outputMode, supportsNative, supportsRaster])
   const renderTarget = intendedTarget ? sizeMode === 'template' ? intendedTarget : sizeMode === 'printer' ? loadedTarget : customTarget : null
   const templateReady = Boolean(template && (draftId ? template.id === `draft:${draftId}` : template.id === templateId))
-  const renderBody = () => templateReady && template && renderTarget ? { template: template.template, variables: values, target: renderTarget as any, debug: false } : null
-  const preview = async () => { const body = renderBody(); if (!body) return; setBusy('preview'); try { const rendered = await getBackendSdk().renders.renderPngDetailed(body); const next = URL.createObjectURL(rendered.blob); setPrintWarnings(rendered.diagnostics.map((item) => item.message)); setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return next }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
-  const print = async () => { if (!template || !templateReady || !printerId) return; const selectedId = template.id; setBusy('print'); try { const body = renderBody(); if (!body) return; const preflight = await getBackendSdk().renders.renderZpl(body); const warnings = (preflight.diagnostics ?? []).map((item) => item.message); setPrintWarnings(warnings); if (warnings.length && !window.confirm(`This label has ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return; const source = !draftId ? { template_id: selectedId } : { template: template.template }; const result = await getBackendSdk().printJobs.create({ printer_id: printerId, ...source, variables: values, target: renderTarget as any, output_mode: outputMode, origin: 'printhub-studio' }); localStorage.setItem('printhub:printer', printerId); onNotice(result.status === 'failed' ? { tone: 'error', text: result.error ?? 'Print failed.' } : { tone: 'success', text: `Print job ${result.id} ${result.status}.` }) } catch (reason) { onNotice({ tone: 'error', text: errorText(reason) }) } finally { setBusy(null) } }
+  const cableConfig = template ? cableFlagConfig(template.template as TemplateDoc) : null
+  let cableError: string | null = null
+  if (cableConfig && renderTarget) { try { configureCableFlag(template!.template as TemplateDoc, renderTarget, cableConfig) } catch (reason) { cableError = String((reason as Error).message) } }
+  const printLabels = template ? templateLabels(template.template as TemplateDoc) : []
+  const renderBody = () => templateReady && template && renderTarget && !cableError ? { template: cableConfig ? configureCableFlag(template.template as TemplateDoc, renderTarget, cableConfig) : template.template as TemplateDoc, variables: values, target: renderTarget as any, debug: false } : null
+  const preview = async () => {
+      const body = renderBody(); if (!body || actionBusy.current) return
+      actionBusy.current = true
+    setBusy('preview')
+    const urls: string[] = [], warnings: string[] = []
+    try {
+      for (let index = 0; index < printLabels.length; index++) {
+        const rendered = await getBackendSdk().renders.renderPngDetailed({ ...body, template: labelPreviewTemplate(body.template, index) })
+        urls.push(URL.createObjectURL(rendered.blob))
+        warnings.push(...rendered.diagnostics.map((item) => `${printLabels[index].name ?? `Label ${index + 1}`}: ${item.message}`))
+      }
+      setPrintWarnings(warnings)
+      setPreviewUrls(urls)
+    } catch (reason) { urls.forEach((url) => URL.revokeObjectURL(url)); onNotice({ tone: 'error', text: errorText(reason) }) }
+      finally { actionBusy.current = false; setBusy(null) }
+  }
+  const print = async () => {
+      const body = renderBody(); if (!body || !template || !printerId || actionBusy.current) return
+      actionBusy.current = true
+    setBusy('print')
+    let sending = false
+    try {
+      const preflight = await getBackendSdk().renders.renderZpl(body)
+      const warnings = (preflight.diagnostics ?? []).map((item) => item.message)
+      setPrintWarnings(warnings)
+      if (warnings.length && !window.confirm(`These labels have ${warnings.length} text layout warning(s):\n\n${warnings.join('\n')}\n\nPrint anyway?`)) return
+      const source = !draftId && !cableConfig ? { template_id: template.id } : { template: body.template }
+      sending = true
+      const result = await getBackendSdk().printJobs.create({ printer_id: printerId, ...source, variables: body.variables, target: body.target, output_mode: outputMode, origin: 'printhub-studio' })
+      sending = false
+      localStorage.setItem('printhub:printer', printerId)
+      onNotice({ tone: result.status === 'failed' ? 'error' : result.status === 'held' ? 'info' : 'success', text: `${printLabels.length} label(s), one print job ${result.id}: ${result.status}. ${result.error ?? ''}` })
+    } catch (reason) { onNotice({ tone: 'error', text: `${errorText(reason)}${sending ? ' The request outcome is unknown. Check Print jobs before reprinting.' : ''}` }) }
+      finally { actionBusy.current = false; setBusy(null) }
+  }
   return <main className='page-shell quick-print-page'><header className='page-heading compact'><div><span className='eyebrow'>Quick print</span><h1>Choose, fill, print</h1><p>This view is designed for phones, scanners and quick repeat jobs.</p></div></header><div className='quick-print-layout'><section className='form-panel'>
     {!draftId && <label className='field'><span>Template</span><select value={templateId} disabled={busy !== null} onChange={(event) => { setTemplateId(event.target.value); sessionStorage.setItem('printhub:selectedTemplate', event.target.value) }}><option value=''>Choose a template…</option>{templates.items.filter((item) => !item.archived || item.id === templateId).sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id}>{item.favorite ? '★ ' : ''}{item.name}{item.archived ? ' (archived)' : ''}</option>)}</select></label>}
     {template && intendedTarget && <div className='selected-template'><strong>{template.name}</strong><span>Designed for {formatSize(intendedTarget)}</span></div>}
     <div className='variable-form'>{(template?.variables ?? []).filter((entry: any) => !String(entry.name ?? '').startsWith('_')).map((entry: any) => <FieldInput key={String(entry.name)} definition={entry} value={values[String(entry.name)] ?? ''} onChange={(value) => setValues((current) => ({ ...current, [String(entry.name)]: value }))} />)}</div>
+    {cableConfig && renderTarget && <CableFlagControls config={cableConfig} target={renderTarget} disabled={busy !== null} onChange={(config) => setTemplate((current) => current ? { ...current, template: { ...current.template, extensions: { ...(current.template as TemplateDoc).extensions, cable_flag: config } } } : current)} />}
+    {printLabels.length > 1 && <p className='field-help'>This template prints {printLabels.length} labels in one job. Fill the fields once.</p>}
     <label className='field'><span>Printer</span><select value={printerId} onChange={(event) => { const nextId = event.target.value; const nextPrinter = printerData.printers.find((printer) => String(printer.id) === nextId); setPrinterId(nextId); setSizeMode(printerRenderTarget(nextPrinter) ? 'printer' : 'template') }}><option value=''>Choose a printer…</option>{printerData.printers.filter((printer) => printer.enabled !== false).map((printer) => <option key={printer.id} value={printer.id}>{printerOptionLabel(printer)}</option>)}</select><small className='field-help'>{selectedPrinter ? `Printer ID: ${selectedPrinter.id}` : 'Select where the finished label should be sent.'}</small></label>
     {selectedPrinter && <label className='field'><span>Print format</span><select value={outputMode} onChange={(event) => setOutputMode(event.target.value as 'auto' | 'native' | 'raster')}><option value='auto'>Automatic — prefer native ZPL</option><option value='native' disabled={!supportsNative}>Native ZPL</option><option value='raster' disabled={!supportsRaster}>Rendered image</option></select><small className='field-help'>{outputMode === 'raster' ? 'The complete label is rendered through Labelary and sent as pixels.' : outputMode === 'native' ? 'The printer receives the compiled ZPL directly.' : supportsNative ? 'This printer will receive native ZPL.' : 'This printer will receive a rendered raster image.'}</small></label>}
     {template && intendedTarget && <OutputSizePicker mode={sizeMode} onMode={setSizeMode} templateTarget={intendedTarget} printerTarget={loadedTarget} printerName={String(selectedPrinter?.name ?? selectedPrinter?.id ?? 'the selected printer')} customTarget={customTarget} onCustomTarget={setCustomTarget} />}
+    {cableError && <p className='text-danger' role='alert'>{cableError}</p>}
     {printWarnings.length > 0 && <div className='builder-warning' role='status'><strong>Text layout warnings</strong><ul className='list-disc pl-5'>{printWarnings.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul></div>}
-    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!templateReady || !renderTarget || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!templateReady || !renderTarget || !printerId || busy !== null}>{busy === 'print' ? 'Checking and sending…' : 'Print label'}</button></div>
-  </section><section className='print-preview' aria-label='Label preview'>{previewUrl ? <><div className='preview-size-badge'>{formatSize(renderTarget)}</div><img src={previewUrl} alt='Rendered label preview' /></> : <div className='preview-placeholder'>{template && renderTarget ? `Preview will use ${formatSize(renderTarget)}` : 'Select a template'}</div>}</section></div></main>
+    <div className='quick-actions'><button type='button' onClick={() => void preview()} disabled={!templateReady || !renderTarget || Boolean(cableError) || busy !== null}>{busy === 'preview' ? 'Rendering…' : 'Preview labels'}</button><button className='primary-action' type='button' onClick={() => void print()} disabled={!templateReady || !renderTarget || !printerId || Boolean(cableError) || busy !== null}>{busy === 'print' ? 'Checking and sending…' : printLabels.length > 1 ? `Print ${printLabels.length} labels` : 'Print label'}</button></div>
+  </section><section className='print-preview' aria-label='Label preview'>{previewUrls.length ? <div style={{ display: 'grid', gap: 16, width: '100%' }}>{previewUrls.map((url, index) => <figure key={url} style={{ margin: 0 }}><figcaption className='preview-size-badge'>{printLabels[index]?.name ?? `Label ${index + 1}`} · {formatSize(renderTarget)}</figcaption><img src={url} alt={`Rendered label ${index + 1}`} /></figure>)}</div> : <div className='preview-placeholder'>{template && renderTarget ? `Preview will show ${printLabels.length} label(s) at ${formatSize(renderTarget)}` : 'Select a template'}</div>}</section></div></main>
 }
 
 function Designer() {

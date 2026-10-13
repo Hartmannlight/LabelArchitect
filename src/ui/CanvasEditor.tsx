@@ -1,6 +1,7 @@
 import { type WheelEvent, useMemo } from 'react'
 import { Circle, Group, Layer, Rect, Stage, Text as KText } from 'react-konva'
-import { computeLayout } from '../model/layout'
+import { computeLayout, rotationOf, transformPoint } from '../model/layout'
+import { cableFlagPreviewLayout } from '../model/cableFlag'
 import { useTemplateEditorStore } from '../state/store'
 import { useSize } from './useSize'
 
@@ -30,10 +31,9 @@ export default function CanvasEditor() {
   const setSettings = useTemplateEditorStore((s) => s.setSettings)
 
   const effectiveScale = settings.scalePxPerMm * settings.previewZoom
-  const layout = useMemo(() => computeLayout(doc.layout, preview.width_mm, preview.height_mm, { scalePxPerMm: effectiveScale }), [
-    doc.layout,
-    preview.width_mm,
-    preview.height_mm,
+  const layout = useMemo(() => computeLayout(cableFlagPreviewLayout(doc, preview), preview.width_mm, preview.height_mm, { scalePxPerMm: effectiveScale, leafPaddingMm: doc.defaults?.leaf_padding_mm }), [
+    doc,
+    preview,
     effectiveScale
   ])
 
@@ -134,6 +134,7 @@ export default function CanvasEditor() {
             const cw = leaf.contentRect.w
             const ch = leaf.contentRect.h
 
+            const labelOrigin = transformPoint(leaf.transform, leaf.localContentRect.x, leaf.localContentRect.y)
             const label =
               leaf.element.type === 'text'
                 ? 'Text'
@@ -168,15 +169,17 @@ export default function CanvasEditor() {
                   fill='rgba(0,0,0,0)'
                 />
                 <Rect key={leaf.nodeId + ':content'} x={cx} y={cy} width={cw} height={ch} stroke={colors.contentStroke} strokeWidth={1} />
-                <KText key={leaf.nodeId + ':label'} x={cx + 4} y={cy + 4} text={label} fontSize={12} fill={colors.label} />
-                <KText
-                  key={leaf.nodeId + ':id'}
-                  x={cx + 4}
-                  y={cy + 18}
-                  text={leaf.alias ? `${leaf.alias} (${leaf.nodeId})` : leaf.nodeId}
-                  fontSize={10}
-                  fill={colors.sublabel}
-                />
+                <Group x={ox + labelOrigin.x} y={oy + labelOrigin.y} rotation={rotationOf(leaf.transform)} clipWidth={leaf.localContentRect.w} clipHeight={leaf.localContentRect.h}>
+                  <KText key={leaf.nodeId + ':label'} x={4} y={4} text={`${label} ${rotationOf(leaf.transform)}°`} fontSize={12} fill={colors.label} />
+                  <KText
+                    key={leaf.nodeId + ':id'}
+                    x={4}
+                    y={18}
+                    text={leaf.alias ? `${leaf.alias} (${leaf.nodeId})` : leaf.nodeId}
+                    fontSize={10}
+                    fill={colors.sublabel}
+                  />
+                </Group>
               </Group>
             )
           })}
@@ -188,15 +191,15 @@ export default function CanvasEditor() {
             const gw = s.gutterRect.w
             const gh = s.gutterRect.h
             const parentRect = { x: ox + s.rect.x, y: oy + s.rect.y, w: s.rect.w, h: s.rect.h }
-            const gutterPx = s.node.direction === 'v' ? s.gutterRect.w : s.gutterRect.h
+            const gutterPx = s.direction === 'v' ? s.gutterRect.w : s.gutterRect.h
 
-            const hitW = Math.max(gw, s.node.direction === 'v' ? 10 : gw)
-            const hitH = Math.max(gh, s.node.direction === 'h' ? 10 : gh)
-            const hitX = s.node.direction === 'v' ? gx + gw / 2 - hitW / 2 : gx
-            const hitY = s.node.direction === 'h' ? gy + gh / 2 - hitH / 2 : gy
+            const hitW = Math.max(gw, s.direction === 'v' ? 10 : gw)
+            const hitH = Math.max(gh, s.direction === 'h' ? 10 : gh)
+            const hitX = s.direction === 'v' ? gx + gw / 2 - hitW / 2 : gx
+            const hitY = s.direction === 'h' ? gy + gh / 2 - hitH / 2 : gy
 
             const dragBoundFunc = (pos: { x: number; y: number }) => {
-              if (s.node.direction === 'v') {
+              if (s.direction === 'v') {
                 const minX = parentRect.x + (gutterPx > 0 ? gutterPx / 2 : 0) - hitW / 2
                 const maxX = parentRect.x + parentRect.w - (gutterPx > 0 ? gutterPx / 2 : 0) - hitW / 2
                 return { x: clamp(pos.x, minX, maxX), y: hitY }
@@ -209,13 +212,13 @@ export default function CanvasEditor() {
             const onDragMove = (e: any) => {
               const x = e.target.x() + hitW / 2
               const y = e.target.y() + hitH / 2
-              if (s.node.direction === 'v') {
+              if (s.direction === 'v') {
                 const available = Math.max(1, parentRect.w - gutterPx)
                 const child0End = x - parentRect.x - gutterPx / 2
                 let ratio = child0End / available
                 ratio = snapRatio(ratio, snapStep)
                 ratio = clamp(ratio, 0.01, 0.99)
-                setSplitRatio(s.nodeId, ratio)
+                setSplitRatio(s.nodeId, s.reversed ? 1 - ratio : ratio)
                 return
               }
 
@@ -224,7 +227,7 @@ export default function CanvasEditor() {
               let ratio = child0End / available
               ratio = snapRatio(ratio, snapStep)
               ratio = clamp(ratio, 0.01, 0.99)
-              setSplitRatio(s.nodeId, ratio)
+              setSplitRatio(s.nodeId, s.reversed ? 1 - ratio : ratio)
             }
 
             const gutterFill = isSelected ? colors.gutterSelected : colors.gutter
@@ -280,14 +283,14 @@ export default function CanvasEditor() {
 
                 <SplitHandle
                   splitId={s.nodeId}
-                  direction={s.node.direction}
+                  direction={s.direction}
                   parentRect={parentRect}
                   gutterPx={gutterPx}
                   handleCenter={{ x: gx + gw / 2, y: gy + gh / 2 }}
                   selected={isSelected}
                   snapStep={snapStep}
                   colors={colors}
-                  onChangeRatio={(r) => setSplitRatio(s.nodeId, r)}
+                  onChangeRatio={(r) => setSplitRatio(s.nodeId, s.reversed ? 1 - r : r)}
                   onSelect={() => selectNode(s.nodeId)}
                 />
               </Group>
