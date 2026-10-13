@@ -1,6 +1,7 @@
 export type SchemaVersion = 1
 
 export type Direction = 'v' | 'h'
+export type RotationDeg = 0 | 90 | 180 | -90 | 270
 
 export type PaddingMm = [number, number, number, number]
 
@@ -139,6 +140,7 @@ export type Element = TextElement | QrElement | DataMatrixElement | ImageElement
 
 export type SplitNode = {
   kind: 'split'
+  rotation_deg?: RotationDeg
   alias?: string
   background?: ImageBackground
   direction: Direction
@@ -151,6 +153,7 @@ export type SplitNode = {
 
 export type LeafNode = {
   kind: 'leaf'
+  rotation_deg?: RotationDeg
   alias?: string
   background?: ImageBackground
   padding_mm?: PaddingMm
@@ -166,6 +169,7 @@ export type TemplateDoc = {
   name?: string
   defaults?: TemplateDefaults
   layout: Node
+  labels?: Array<{ name?: string; layout?: Node; bindings?: Record<string, string> }>
   extensions?: Record<string, unknown>
 }
 

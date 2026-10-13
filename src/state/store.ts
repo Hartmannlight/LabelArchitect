@@ -5,6 +5,7 @@ import { listNodes } from '../model/ids'
 import { cloneProjectDefaults, PROJECT_ELEMENT_DEFAULTS } from '../config/projectDefaults'
 import { makeHistory, push, redo, reset, undo, type HistoryState } from './history'
 import * as ops from './operations'
+import { configureCableFlag, type CableFlagConfig } from '../model/cableFlag'
 
 export type Tool =
   | 'select'
@@ -51,6 +52,7 @@ export type TemplateEditorState = {
   setDraftPreviewDataUrl: (url: string | null) => void
 
   setTemplateName: (name: string) => void
+  setTemplateLabels: (labels: NonNullable<TemplateDoc['labels']>) => void
   setDefaultsRaw: (defaults: any) => void
 
   splitLeafAt: (nodeId: string, direction: 'v' | 'h') => void
@@ -66,6 +68,8 @@ export type TemplateEditorState = {
 
   setAlias: (nodeId: string, alias: string) => void
   clearAlias: (nodeId: string) => void
+  setNodeRotation: (nodeId: string, rotation: Node['rotation_deg']) => void
+  setCableFlagConfig: (config: CableFlagConfig) => void
 
   setNodeBackground: (nodeId: string, background: ImageBackground | undefined) => void
   patchNodeBackground: (nodeId: string, patch: Partial<ImageBackground>) => void
@@ -290,6 +294,12 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
       set({ history: push(h, next), validationIssues: validate(next) })
     },
 
+    setTemplateLabels: (labels) => {
+      const h = get().history
+      const next = { ...h.present, labels }
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
 
     splitLeafAt: (nodeId, direction) => {
       const h = get().history
@@ -318,6 +328,19 @@ export const useTemplateEditorStore = create<TemplateEditorState>((set, get) => 
     setSplitRatio: (nodeId, ratio) => {
       const h = get().history
       const next = ops.setSplitRatio(h.present, nodeId, ratio)
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
+    setNodeRotation: (nodeId, rotation) => {
+      const h = get().history
+      const next = ops.setNodeRotation(h.present, nodeId, rotation)
+      set({ history: push(h, next), validationIssues: validate(next) })
+    },
+
+    setCableFlagConfig: (config) => {
+      const h = get().history
+      let next = { ...h.present, extensions: { ...h.present.extensions, cable_flag: config } }
+      try { next = configureCableFlag(h.present, get().preview, config) as typeof next } catch { /* Keep invalid inputs visible; rendering rejects them. */ }
       set({ history: push(h, next), validationIssues: validate(next) })
     },
 

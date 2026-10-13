@@ -63,7 +63,13 @@ function collectFromNode(node: Node, bucket: Set<string>) {
 
 export function extractTemplateVariables(doc: TemplateDoc): { variables: string[]; macros: string[] } {
   const bucket = new Set<string>()
-  collectFromNode(doc.layout, bucket)
+  if (doc.labels?.length) {
+    for (const label of doc.labels) {
+      const local = new Set<string>()
+      collectFromNode(label.layout ?? doc.layout, local)
+      for (const name of local) bucket.add(label.bindings?.[name] ?? name)
+    }
+  } else collectFromNode(doc.layout, bucket)
   const variables: string[] = []
   const macros: string[] = []
   for (const name of bucket) {
